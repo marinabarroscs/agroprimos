@@ -31,7 +31,7 @@ export default function Home() {
   const [showEditarLote, setShowEditarLote] = useState(false)
   
   const [novoLancamento, setNovoLancamento] = useState({
-    tipo: 'saida', categoria: '', descricao: '', valor: '',
+    tipo: 'saida', categoria: '', subcategoria: '', descricao: '', valor: '',
     data: new Date().toISOString().split('T')[0], socio_id: '', rateio_lote: true
   })
   
@@ -44,14 +44,18 @@ export default function Home() {
   const [showEditAnimal, setShowEditAnimal] = useState(false)
   const [editandoAnimal, setEditandoAnimal] = useState(null)
   
+  // Filtros de lançamentos
+  const [filtroData, setFiltroData] = useState('')
+  const [filtroCategoria, setFiltroCategoria] = useState('')
+  
   const [novoAnimal, setNovoAnimal] = useState({
     nome: '', apelido: '', brinco: '', raca: 'Nelore', sexo: 'Fêmea',
-    idade: '', cor: '', peso_compra: '', valor_compra: '',
+    idade: '', cor: '', arroba_compra: '', valor_compra: '',
     data_compra: new Date().toISOString().split('T')[0], observacoes: ''
   })
   
   const [novaPesagem, setNovaPesagem] = useState({
-    data: new Date().toISOString().split('T')[0], peso: '', observacao: ''
+    data: new Date().toISOString().split('T')[0], arroba: '', observacao: ''
   })
   
   const [observacoesFechamento, setObservacoesFechamento] = useState('')
@@ -114,75 +118,62 @@ export default function Home() {
         if (animalIds.length > 0) {
           const { data: pesagensData } = await supabase.from('pesagens').select('*').in('animal_id', animalIds).order('data', { ascending: true })
           setPesagens(pesagensData || [])
-        } else {
-          setPesagens([])
-        }
+        } else { setPesagens([]) }
         const { data: caixaData } = await supabase.from('v_caixa_atual').select('*').single()
         setCaixa(caixaData)
         const { data: sociosLoteData } = await supabase.from('v_socios_lote_atual').select('*')
         setSociosLote(sociosLoteData || [])
       } else {
-        setAnimais([])
-        setLancamentos([])
-        setPesagens([])
-        setCaixa(null)
-        setSociosLote([])
+        setAnimais([]); setLancamentos([]); setPesagens([]); setCaixa(null); setSociosLote([])
       }
     } catch (error) { console.error('Erro:', error) }
     setLoading(false)
   }
 
-  // Criar novo lote
   const handleCriarNovoLote = async () => {
-    if (!novoLoteData.nome || !novoLoteData.data_inicio) {
-      alert('Preencha o nome e a data de início do lote!')
-      return
-    }
-    const { error } = await supabase.from('lotes').insert({
-      nome: novoLoteData.nome,
-      data_inicio: novoLoteData.data_inicio,
-      status: 'ativo'
-    })
-    if (error) {
-      alert('Erro ao criar lote: ' + error.message)
-    } else {
-      setShowNovoLote(false)
-      setNovoLoteData({ nome: '', data_inicio: new Date().toISOString().split('T')[0] })
-      alert('Lote criado com sucesso!')
-      await loadAllData()
-    }
+    if (!novoLoteData.nome || !novoLoteData.data_inicio) { alert('Preencha o nome e a data!'); return }
+    const { error } = await supabase.from('lotes').insert({ nome: novoLoteData.nome, data_inicio: novoLoteData.data_inicio, status: 'ativo' })
+    if (error) { alert('Erro: ' + error.message) } 
+    else { setShowNovoLote(false); setNovoLoteData({ nome: '', data_inicio: new Date().toISOString().split('T')[0] }); alert('Lote criado!'); await loadAllData() }
   }
 
-  // Editar lote atual
   const handleEditarLote = async () => {
-    if (!editandoLoteData.nome || !editandoLoteData.data_inicio) {
-      alert('Preencha todos os campos!')
-      return
-    }
-    const { error } = await supabase.from('lotes').update({
-      nome: editandoLoteData.nome,
-      data_inicio: editandoLoteData.data_inicio
-    }).eq('id', loteAtual.id)
-    if (error) {
-      alert('Erro ao salvar: ' + error.message)
-    } else {
-      setShowEditarLote(false)
-      await loadAllData()
-    }
+    if (!editandoLoteData.nome || !editandoLoteData.data_inicio) { alert('Preencha todos os campos!'); return }
+    await supabase.from('lotes').update({ nome: editandoLoteData.nome, data_inicio: editandoLoteData.data_inicio }).eq('id', loteAtual.id)
+    setShowEditarLote(false); await loadAllData()
   }
 
   const handleSaveLancamento = async () => {
     if (!novoLancamento.categoria || !novoLancamento.valor || !novoLancamento.data) { alert('Preencha todos os campos!'); return }
+    if (novoLancamento.tipo === 'aporte' && !novoLancamento.socio_id) { alert('Selecione o sócio!'); return }
     let valorFinal = parseFloat(novoLancamento.valor)
     if (novoLancamento.tipo === 'saida' || novoLancamento.tipo === 'infraestrutura') valorFinal = -Math.abs(valorFinal)
+    
+    // Montar descrição com nome do sócio para aportes
+    let descricaoFinal = novoLancamento.descricao
+    if (novoLancamento.tipo === 'aporte') {
+      const socio = socios.find(s => s.id === parseInt(novoLancamento.socio_id))
+      const tipoAporte = novoLancamento.subcategoria === 'aporte_inicial' ? 'Aporte Inicial' : 'Aporte'
+      descricaoFinal = socio ? `${tipoAporte} - ${socio.nome}` : tipoAporte
+    }
+    
     await supabase.from('lancamentos').insert({
       lote_id: loteAtual.id, tipo: novoLancamento.tipo, categoria: novoLancamento.categoria,
-      descricao: novoLancamento.descricao, valor: valorFinal, data: novoLancamento.data,
+      descricao: descricaoFinal, valor: valorFinal, data: novoLancamento.data,
       socio_id: novoLancamento.tipo === 'aporte' ? parseInt(novoLancamento.socio_id) : null, rateio_lote: novoLancamento.rateio_lote
     })
     setShowNewLancamento(false)
-    setNovoLancamento({ tipo: 'saida', categoria: '', descricao: '', valor: '', data: new Date().toISOString().split('T')[0], socio_id: '', rateio_lote: true })
+    setNovoLancamento({ tipo: 'saida', categoria: '', subcategoria: '', descricao: '', valor: '', data: new Date().toISOString().split('T')[0], socio_id: '', rateio_lote: true })
     await loadAllData()
+  }
+
+  const handleDuplicarLancamento = (l) => {
+    setNovoLancamento({
+      tipo: l.tipo, categoria: l.categoria, subcategoria: '', descricao: l.descricao || '',
+      valor: Math.abs(l.valor).toString(), data: new Date().toISOString().split('T')[0],
+      socio_id: l.socio_id?.toString() || '', rateio_lote: l.rateio_lote
+    })
+    setShowNewLancamento(true)
   }
 
   const handleEditLancamento = (l) => { setEditandoLancamento({...l, valor: Math.abs(l.valor).toString()}); setShowEditLancamento(true) }
@@ -206,10 +197,14 @@ export default function Home() {
     await loadAllData()
   }
 
+  // Arroba vivo (compra) = 15kg, Arroba morto (venda) = 30kg
+  const ARROBA_VIVO = 15
+  const ARROBA_MORTO = 30
+
   const handleSaveAnimal = async () => {
-    if (!novoAnimal.nome || !novoAnimal.peso_compra || !novoAnimal.valor_compra) { alert('Preencha os campos!'); return }
-    const pesoCompra = parseFloat(novoAnimal.peso_compra)
-    const arrobaCompra = (pesoCompra / 15).toFixed(2)
+    if (!novoAnimal.nome || !novoAnimal.arroba_compra || !novoAnimal.valor_compra) { alert('Preencha os campos!'); return }
+    const arrobaCompra = parseFloat(novoAnimal.arroba_compra)
+    const pesoCompra = arrobaCompra * ARROBA_VIVO
     const { data: animalData } = await supabase.from('animais').insert({
       lote_id: loteAtual.id, nome: novoAnimal.nome, apelido: novoAnimal.apelido, brinco: novoAnimal.brinco,
       raca: novoAnimal.raca, sexo: novoAnimal.sexo, idade: novoAnimal.idade, cor: novoAnimal.cor,
@@ -222,26 +217,28 @@ export default function Home() {
       await supabase.from('lancamentos').insert({ lote_id: loteAtual.id, animal_id: animalData.id, tipo: 'saida', categoria: 'compra_gado', descricao: novoAnimal.nome, valor: -parseFloat(novoAnimal.valor_compra), data: novoAnimal.data_compra, rateio_lote: false })
     }
     setShowNewAnimal(false)
-    setNovoAnimal({ nome: '', apelido: '', brinco: '', raca: 'Nelore', sexo: 'Fêmea', idade: '', cor: '', peso_compra: '', valor_compra: '', data_compra: new Date().toISOString().split('T')[0], observacoes: '' })
+    setNovoAnimal({ nome: '', apelido: '', brinco: '', raca: 'Nelore', sexo: 'Fêmea', idade: '', cor: '', arroba_compra: '', valor_compra: '', data_compra: new Date().toISOString().split('T')[0], observacoes: '' })
     await loadAllData()
   }
 
   const handleSavePesagem = async () => {
-    if (!novaPesagem.peso || !novaPesagem.data) { alert('Preencha os campos!'); return }
-    const peso = parseFloat(novaPesagem.peso), arroba = (peso / 15).toFixed(2)
+    if (!novaPesagem.arroba || !novaPesagem.data) { alert('Preencha os campos!'); return }
+    const arroba = parseFloat(novaPesagem.arroba)
+    const peso = arroba * ARROBA_VIVO
     await supabase.from('pesagens').insert({ animal_id: selectedAnimal.id, data: novaPesagem.data, peso, arroba, observacao: novaPesagem.observacao })
     await supabase.from('animais').update({ peso_atual: peso, arroba_atual: arroba }).eq('id', selectedAnimal.id)
-    setShowAddPesagem(false); setNovaPesagem({ data: new Date().toISOString().split('T')[0], peso: '', observacao: '' })
+    setShowAddPesagem(false); setNovaPesagem({ data: new Date().toISOString().split('T')[0], arroba: '', observacao: '' })
     await loadAllData()
     const { data: upd } = await supabase.from('animais').select('*').eq('id', selectedAnimal.id).single()
     setSelectedAnimal(upd)
   }
 
-  const handleEditPesagem = (p) => { setEditandoPesagem({...p, peso: p.peso.toString()}); setShowEditPesagem(true) }
+  const handleEditPesagem = (p) => { setEditandoPesagem({...p, arroba: p.arroba?.toString() || ''}); setShowEditPesagem(true) }
 
   const handleSaveEditPesagem = async () => {
-    if (!editandoPesagem.peso) { alert('Preencha o peso!'); return }
-    const peso = parseFloat(editandoPesagem.peso), arroba = (peso / 15).toFixed(2)
+    if (!editandoPesagem.arroba) { alert('Preencha a arroba!'); return }
+    const arroba = parseFloat(editandoPesagem.arroba)
+    const peso = arroba * ARROBA_VIVO
     await supabase.from('pesagens').update({ data: editandoPesagem.data, peso, arroba, observacao: editandoPesagem.observacao }).eq('id', editandoPesagem.id)
     const animalPesagens = pesagens.filter(p => p.animal_id === selectedAnimal.id)
     const ultima = animalPesagens[animalPesagens.length - 1]
@@ -259,10 +256,12 @@ export default function Home() {
     setSelectedAnimal(upd)
   }
 
-  const handleVendaAnimal = async (animalId, pesoVenda, valorVenda, dataVenda) => {
-    const peso = parseFloat(pesoVenda), arroba = (peso / 15).toFixed(2)
+  // Venda usa arroba morto (30kg)
+  const handleVendaAnimal = async (animalId, arrobaVenda, valorVenda, dataVenda) => {
+    const arroba = parseFloat(arrobaVenda)
+    const peso = arroba * ARROBA_MORTO // Peso morto
     await supabase.from('animais').update({ peso_venda: peso, arroba_venda: arroba, valor_venda: parseFloat(valorVenda), data_venda: dataVenda, status: 'vendido' }).eq('id', animalId)
-    await supabase.from('pesagens').insert({ animal_id: animalId, data: dataVenda, peso, arroba, observacao: 'Peso de venda' })
+    await supabase.from('pesagens').insert({ animal_id: animalId, data: dataVenda, peso, arroba, observacao: 'Peso de venda (@ morto)' })
     const animal = animais.find(a => a.id === animalId)
     await supabase.from('lancamentos').insert({ lote_id: loteAtual.id, animal_id: animalId, tipo: 'entrada', categoria: 'venda_gado', descricao: animal?.nome || 'Venda', valor: parseFloat(valorVenda), data: dataVenda, rateio_lote: false })
     await loadAllData(); setShowAnimalModal(false)
@@ -272,54 +271,44 @@ export default function Home() {
     setEditandoAnimal({
       id: a.id, nome: a.nome, apelido: a.apelido || '', brinco: a.brinco || '',
       raca: a.raca, sexo: a.sexo, idade: a.idade || '', cor: a.cor || '',
-      peso_compra: a.peso_compra?.toString() || '', valor_compra: a.valor_compra?.toString() || '',
+      arroba_compra: a.arroba_compra?.toString() || '', valor_compra: a.valor_compra?.toString() || '',
       data_compra: a.data_compra || '', observacoes: a.observacoes || ''
     })
     setShowEditAnimal(true)
   }
 
   const handleSaveEditAnimal = async () => {
-    if (!editandoAnimal.nome || !editandoAnimal.peso_compra || !editandoAnimal.valor_compra) {
-      alert('Preencha os campos obrigatórios!')
-      return
-    }
-    const pesoCompra = parseFloat(editandoAnimal.peso_compra)
-    const arrobaCompra = (pesoCompra / 15).toFixed(2)
+    if (!editandoAnimal.nome || !editandoAnimal.arroba_compra || !editandoAnimal.valor_compra) { alert('Preencha os campos obrigatórios!'); return }
+    const arrobaCompra = parseFloat(editandoAnimal.arroba_compra)
+    const pesoCompra = arrobaCompra * ARROBA_VIVO
     await supabase.from('animais').update({
       nome: editandoAnimal.nome, apelido: editandoAnimal.apelido, brinco: editandoAnimal.brinco,
       raca: editandoAnimal.raca, sexo: editandoAnimal.sexo, idade: editandoAnimal.idade, cor: editandoAnimal.cor,
       peso_compra: pesoCompra, arroba_compra: arrobaCompra, valor_compra: parseFloat(editandoAnimal.valor_compra),
       data_compra: editandoAnimal.data_compra, observacoes: editandoAnimal.observacoes
     }).eq('id', editandoAnimal.id)
-    // Atualiza o lançamento de compra correspondente
     await supabase.from('lancamentos').update({
       descricao: editandoAnimal.nome, valor: -parseFloat(editandoAnimal.valor_compra), data: editandoAnimal.data_compra
     }).eq('animal_id', editandoAnimal.id).eq('categoria', 'compra_gado')
-    setShowEditAnimal(false)
-    setEditandoAnimal(null)
-    await loadAllData()
+    setShowEditAnimal(false); setEditandoAnimal(null); await loadAllData()
     const { data: upd } = await supabase.from('animais').select('*').eq('id', editandoAnimal.id).single()
     setSelectedAnimal(upd)
   }
 
   const handleDeleteAnimal = async (animalId) => {
-    if (!confirm('Excluir este animal? Isso também removerá todas as pesagens e lançamentos relacionados.')) return
-    // Remove pesagens
+    if (!confirm('Excluir este animal? Isso também removerá pesagens e lançamentos.')) return
     await supabase.from('pesagens').delete().eq('animal_id', animalId)
-    // Remove lançamentos (compra e venda)
     await supabase.from('lancamentos').delete().eq('animal_id', animalId)
-    // Remove animal
     await supabase.from('animais').delete().eq('id', animalId)
-    setShowAnimalModal(false)
-    setSelectedAnimal(null)
-    await loadAllData()
+    setShowAnimalModal(false); setSelectedAnimal(null); await loadAllData()
   }
 
-  const handleEditVenda = (a) => { setEditandoVenda({ id: a.id, peso_venda: a.peso_venda?.toString() || '', valor_venda: a.valor_venda?.toString() || '', data_venda: a.data_venda || '' }); setShowEditVenda(true) }
+  const handleEditVenda = (a) => { setEditandoVenda({ id: a.id, arroba_venda: a.arroba_venda?.toString() || '', valor_venda: a.valor_venda?.toString() || '', data_venda: a.data_venda || '' }); setShowEditVenda(true) }
 
   const handleSaveEditVenda = async () => {
-    if (!editandoVenda.peso_venda || !editandoVenda.valor_venda || !editandoVenda.data_venda) { alert('Preencha tudo!'); return }
-    const peso = parseFloat(editandoVenda.peso_venda), arroba = (peso / 15).toFixed(2)
+    if (!editandoVenda.arroba_venda || !editandoVenda.valor_venda || !editandoVenda.data_venda) { alert('Preencha tudo!'); return }
+    const arroba = parseFloat(editandoVenda.arroba_venda)
+    const peso = arroba * ARROBA_MORTO
     await supabase.from('animais').update({ peso_venda: peso, arroba_venda: arroba, valor_venda: parseFloat(editandoVenda.valor_venda), data_venda: editandoVenda.data_venda }).eq('id', editandoVenda.id)
     await supabase.from('lancamentos').update({ valor: parseFloat(editandoVenda.valor_venda), data: editandoVenda.data_venda }).eq('animal_id', editandoVenda.id).eq('categoria', 'venda_gado')
     setShowEditVenda(false); setEditandoVenda(null); await loadAllData()
@@ -331,14 +320,14 @@ export default function Home() {
     if (!confirm('Cancelar venda? Animal voltará para ativo.')) return
     await supabase.from('animais').update({ peso_venda: null, arroba_venda: null, valor_venda: null, data_venda: null, status: 'ativo' }).eq('id', animalId)
     await supabase.from('lancamentos').delete().eq('animal_id', animalId).eq('categoria', 'venda_gado')
-    await supabase.from('pesagens').delete().eq('animal_id', animalId).eq('observacao', 'Peso de venda')
+    await supabase.from('pesagens').delete().eq('animal_id', animalId).ilike('observacao', '%venda%')
     await loadAllData(); setShowAnimalModal(false)
   }
 
   const handleFecharLote = async () => {
     const animaisAtivos = animais.filter(a => a.status === 'ativo')
     if (animaisAtivos.length > 0) { alert('Ainda existem ' + animaisAtivos.length + ' animal(is) não vendido(s).'); return }
-    const semVendaCompleta = animais.filter(a => !a.peso_venda || !a.valor_venda || !a.data_venda)
+    const semVendaCompleta = animais.filter(a => !a.arroba_venda || !a.valor_venda || !a.data_venda)
     if (semVendaCompleta.length > 0) { alert('Alguns animais com dados de venda incompletos.'); return }
     if (!confirm('Confirma fechamento do lote?')) return
     const totalAportes = lancamentos.filter(l => l.tipo === 'aporte').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
@@ -366,7 +355,8 @@ export default function Home() {
   const handleSaveObservacoesLote = async (loteId, obs) => {
     await supabase.from('lotes').update({ observacoes: obs }).eq('id', loteId)
     await loadAllData()
-    if (selectedLote) { const upd = await loadLoteData(loteId); setSelectedLote(upd) }
+    const upd = await loadLoteData(loteId)
+    setSelectedLote(upd)
     alert('Observações salvas!')
   }
 
@@ -378,18 +368,28 @@ export default function Home() {
     const totalInfra = Math.abs(parseFloat(caixa.total_infraestrutura)) || 0
     const caixaAtual = parseFloat(caixa.caixa_atual) || 0
     const patrimonioGado = animais.filter(a => a.status === 'ativo').reduce((acc, a) => acc + parseFloat(a.valor_compra || 0), 0)
-    const animaisAtivos = animais.filter(a => a.status === 'ativo')
+    const animaisAtivosArr = animais.filter(a => a.status === 'ativo')
     const animaisVendidos = animais.filter(a => a.status === 'vendido')
-    const totalArrobasAtivas = animaisAtivos.reduce((acc, a) => acc + parseFloat(a.arroba_atual || 0), 0)
+    const totalArrobasAtivas = animaisAtivosArr.reduce((acc, a) => acc + parseFloat(a.arroba_atual || 0), 0)
     const valorMinimoArroba = totalArrobasAtivas > 0 ? totalSaidas / totalArrobasAtivas : 0
-    return { totalAportes, totalEntradas, custoTotal: totalSaidas, totalInfra, caixaAtual, patrimonioGado, animaisAtivos: animaisAtivos.length, animaisVendidos: animaisVendidos.length, totalArrobasAtivas, valorMinimoArroba }
+    return { totalAportes, totalEntradas, custoTotal: totalSaidas, totalInfra, caixaAtual, patrimonioGado, animaisAtivos: animaisAtivosArr.length, animaisVendidos: animaisVendidos.length, totalArrobasAtivas, valorMinimoArroba }
   }
   
   const indicadores = calcularIndicadores()
   const formatMoney = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
   const formatDate = (d) => { if (!d) return '-'; return new Date(d + 'T00:00:00').toLocaleDateString('pt-BR') }
   const calcularDiasLote = (ini, fim) => { if (!ini) return 0; const i = new Date(ini), f = fim ? new Date(fim) : new Date(); return Math.floor((f - i) / (1000 * 60 * 60 * 24)) }
+  const calcularMesesLote = (ini, fim) => { const dias = calcularDiasLote(ini, fim); return (dias / 30).toFixed(1) }
   const getPesagensAnimal = (id) => pesagens.filter(p => p.animal_id === id).sort((a, b) => new Date(a.data) - new Date(b.data))
+
+  // Filtrar lançamentos
+  const lancamentosFiltrados = lancamentos.filter(l => {
+    if (filtroData && l.data !== filtroData) return false
+    if (filtroCategoria && l.categoria !== filtroCategoria) return false
+    return true
+  })
+  
+  const categoriasUnicas = [...new Set(lancamentos.map(l => l.categoria))]
 
   const calcularDRE = () => {
     const aportes = lancamentos.filter(l => l.tipo === 'aporte').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
@@ -407,6 +407,17 @@ export default function Home() {
     const rendimentoSoCustos = mesesLote > 0 && aportes > 0 ? ((resultadoBruto / aportes) / mesesLote) * 100 : 0
     const rendimentoComDespesas = mesesLote > 0 && aportes > 0 ? ((resultadoLiquido / aportes) / mesesLote) * 100 : 0
     return { aportes, vendasGado, outrasEntradas, totalReceitas, compraGado, racao, medicamentos, frete, outrosCustos, totalCustos, infraestrutura, totalDespesas, resultadoBruto, resultadoLiquido, rendimentoSoCustos, rendimentoComDespesas }
+  }
+
+  // Calcular rendimento de um lote fechado
+  const calcularRendimentoLote = (lote) => {
+    if (!lote || !lote.total_aportes || lote.total_aportes <= 0) return { soCustos: 0, comDespesas: 0 }
+    const dias = calcularDiasLote(lote.data_inicio, lote.data_fim)
+    const meses = dias / 30
+    if (meses <= 0) return { soCustos: 0, comDespesas: 0 }
+    const soCustos = ((lote.resultado_bruto / lote.total_aportes) / meses) * 100
+    const comDespesas = ((lote.resultado_liquido / lote.total_aportes) / meses) * 100
+    return { soCustos, comDespesas }
   }
 
   if (loading) return (<div className="min-h-screen bg-gradient-to-br from-green-900 via-green-800 to-amber-900 flex items-center justify-center"><div className="text-white text-xl">Carregando...</div></div>)
@@ -439,29 +450,29 @@ export default function Home() {
   )
 
   const renderContent = () => {
-    // Se não há lote ativo, mostrar tela para criar
     if (!loteAtual) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
           <div className="text-6xl md:text-8xl mb-6">🐄</div>
           <h2 className="text-xl md:text-2xl font-bold text-gray-700 mb-2">Nenhum lote ativo</h2>
           <p className="text-gray-500 mb-6 text-sm md:text-base">Crie um novo lote para começar a gerenciar seus animais</p>
-          <button onClick={() => setShowNovoLote(true)} className="px-6 py-4 bg-green-900 text-white rounded-xl font-semibold hover:bg-green-800 active:scale-[0.98] text-base md:text-lg">
-            + Criar Novo Lote
-          </button>
+          <button onClick={() => setShowNovoLote(true)} className="px-6 py-4 bg-green-900 text-white rounded-xl font-semibold hover:bg-green-800 active:scale-[0.98] text-base md:text-lg">+ Criar Novo Lote</button>
           {lotes.filter(l => l.status === 'fechado').length > 0 && (
             <div className="mt-8 w-full max-w-md">
               <h3 className="text-sm font-semibold text-gray-500 mb-3">Lotes anteriores:</h3>
               <div className="space-y-2">
-                {lotes.filter(l => l.status === 'fechado').slice(0, 3).map(lote => (
-                  <div key={lote.id} className="bg-white rounded-xl p-4 shadow text-left">
-                    <div className="flex justify-between items-center">
-                      <span className="font-medium">{lote.nome}</span>
-                      <span className={`text-sm font-semibold ${(lote.resultado_liquido || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_liquido)}</span>
+                {lotes.filter(l => l.status === 'fechado').slice(0, 3).map(lote => {
+                  const rend = calcularRendimentoLote(lote)
+                  return (
+                    <div key={lote.id} className="bg-white rounded-xl p-4 shadow text-left">
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium">{lote.nome}</span>
+                        <span className={`text-sm font-semibold ${(lote.resultado_liquido || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_liquido)}</span>
+                      </div>
+                      <div className="text-xs text-gray-500">{formatDate(lote.data_inicio)} - {formatDate(lote.data_fim)} • {rend.comDespesas.toFixed(2)}% a.m.</div>
                     </div>
-                    <div className="text-xs text-gray-500">{formatDate(lote.data_inicio)} - {formatDate(lote.data_fim)}</div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -499,29 +510,47 @@ export default function Home() {
       case 'lancamentos':
         return (
           <div>
-            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4">
               <h2 className="text-xl md:text-2xl font-bold text-green-900">💳 Lançamentos</h2>
               <button onClick={() => setShowNewLancamento(true)} className="w-full md:w-auto px-4 py-3 bg-green-900 text-white rounded-xl font-semibold hover:bg-green-800 active:scale-[0.98] text-sm md:text-base">+ Novo Lançamento</button>
             </div>
+            {/* Filtros */}
+            <div className="bg-white rounded-xl p-4 shadow mb-4 flex flex-wrap gap-3">
+              <div className="flex-1 min-w-[140px]">
+                <label className="block text-xs text-gray-500 mb-1">Filtrar por data</label>
+                <input type="date" value={filtroData} onChange={(e) => setFiltroData(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              </div>
+              <div className="flex-1 min-w-[140px]">
+                <label className="block text-xs text-gray-500 mb-1">Filtrar por categoria</label>
+                <select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
+                  <option value="">Todas</option>
+                  {categoriasUnicas.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              {(filtroData || filtroCategoria) && (
+                <button onClick={() => { setFiltroData(''); setFiltroCategoria('') }} className="self-end px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">Limpar</button>
+              )}
+            </div>
             <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-              {lancamentos.map((item, idx) => (
-                <div key={item.id} className={`p-3 md:p-4 flex justify-between items-center gap-3 ${idx < lancamentos.length - 1 ? 'border-b border-gray-100' : ''}`}>
+              {lancamentosFiltrados.map((item, idx) => (
+                <div key={item.id} className={`p-3 md:p-4 flex justify-between items-center gap-3 ${idx < lancamentosFiltrados.length - 1 ? 'border-b border-gray-100' : ''}`}>
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-base md:text-lg flex-shrink-0 ${item.tipo === 'entrada' || item.tipo === 'aporte' ? 'bg-green-100' : item.tipo === 'infraestrutura' ? 'bg-orange-100' : 'bg-red-100'}`}>
                       {item.tipo === 'entrada' || item.tipo === 'aporte' ? '📥' : item.tipo === 'infraestrutura' ? '🔧' : '📤'}
                     </div>
                     <div className="min-w-0 flex-1"><div className="font-medium text-sm md:text-base truncate">{item.descricao || item.categoria}</div><div className="text-xs md:text-sm text-gray-400 truncate">{item.categoria} • {formatDate(item.data)}</div></div>
                   </div>
-                  <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
+                  <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
                     <div className={`font-semibold text-sm md:text-base ${item.valor >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(item.valor)}</div>
                     <div className="flex gap-1">
-                      <button onClick={() => handleEditLancamento(item)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg active:bg-blue-100">✏️</button>
-                      <button onClick={() => handleDeleteLancamento(item.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg active:bg-red-100">🗑️</button>
+                      <button onClick={() => handleDuplicarLancamento(item)} className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Duplicar">📋</button>
+                      <button onClick={() => handleEditLancamento(item)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">✏️</button>
+                      <button onClick={() => handleDeleteLancamento(item.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">🗑️</button>
                     </div>
                   </div>
                 </div>
               ))}
-              {lancamentos.length === 0 && <div className="p-8 text-center text-gray-400">Nenhum lançamento</div>}
+              {lancamentosFiltrados.length === 0 && <div className="p-8 text-center text-gray-400">{lancamentos.length === 0 ? 'Nenhum lançamento' : 'Nenhum resultado para o filtro'}</div>}
             </div>
           </div>
         )
@@ -535,7 +564,7 @@ export default function Home() {
             </div>
             <div className="space-y-4">
               {animais.map(animal => {
-                const ganho = (parseFloat(animal.peso_atual) || 0) - (parseFloat(animal.peso_compra) || 0)
+                const ganhoArroba = (parseFloat(animal.arroba_atual) || 0) - (parseFloat(animal.arroba_compra) || 0)
                 return (
                   <div key={animal.id} onClick={() => { setSelectedAnimal(animal); setShowAnimalModal(true) }} className="bg-white rounded-2xl p-4 md:p-6 shadow-lg cursor-pointer hover:shadow-xl active:scale-[0.99]">
                     <div className="flex justify-between items-start mb-4 md:mb-5">
@@ -550,9 +579,9 @@ export default function Home() {
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${animal.status === 'ativo' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>{animal.status === 'ativo' ? '🟢 Ativo' : '💰 Vendido'}</span>
                     </div>
                     <div className="grid grid-cols-3 md:grid-cols-5 gap-2 md:gap-3 text-center">
-                      <div className="bg-gray-50 rounded-xl p-2 md:p-3"><div className="text-[10px] md:text-xs text-gray-400">Inicial</div><div className="font-semibold text-xs md:text-base">{animal.peso_compra} kg</div></div>
-                      <div className="bg-blue-50 rounded-xl p-2 md:p-3"><div className="text-[10px] md:text-xs text-blue-600">Atual</div><div className="font-semibold text-blue-700 text-xs md:text-base">{animal.peso_atual} kg</div></div>
-                      <div className="bg-green-50 rounded-xl p-2 md:p-3"><div className="text-[10px] md:text-xs text-green-600">Ganho</div><div className="font-semibold text-green-700 text-xs md:text-base">+{ganho.toFixed(0)} kg</div></div>
+                      <div className="bg-gray-50 rounded-xl p-2 md:p-3"><div className="text-[10px] md:text-xs text-gray-400">@ Compra</div><div className="font-semibold text-xs md:text-base">{animal.arroba_compra} @</div></div>
+                      <div className="bg-blue-50 rounded-xl p-2 md:p-3"><div className="text-[10px] md:text-xs text-blue-600">@ Atual</div><div className="font-semibold text-blue-700 text-xs md:text-base">{animal.arroba_atual} @</div></div>
+                      <div className="bg-green-50 rounded-xl p-2 md:p-3"><div className="text-[10px] md:text-xs text-green-600">Ganho</div><div className="font-semibold text-green-700 text-xs md:text-base">+{ganhoArroba.toFixed(1)} @</div></div>
                       <div className="bg-gray-50 rounded-xl p-2 md:p-3 hidden md:block"><div className="text-[10px] md:text-xs text-gray-400">Compra</div><div className="font-semibold text-xs md:text-base">{formatMoney(animal.valor_compra)}</div></div>
                       {animal.status === 'vendido' ? <div className="bg-blue-50 rounded-xl p-2 md:p-3 hidden md:block"><div className="text-[10px] md:text-xs text-blue-600">Venda</div><div className="font-semibold text-blue-700 text-xs md:text-base">{formatMoney(animal.valor_venda)}</div></div> : <div className="bg-gray-50 rounded-xl p-2 md:p-3 hidden md:block"><div className="text-[10px] md:text-xs text-gray-400">R$/@</div><div className="font-semibold text-xs md:text-base">{formatMoney(animal.valor_compra / animal.arroba_compra)}</div></div>}
                     </div>
@@ -602,7 +631,7 @@ export default function Home() {
                 <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-4 md:mb-5">🐄 INDICADORES DE GADO</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                   <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Animais Ativos</div><div className="text-xl md:text-2xl font-bold">{indicadores.animaisAtivos}</div></div>
-                  <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Total Arrobas</div><div className="text-xl md:text-2xl font-bold">{indicadores.totalArrobasAtivas.toFixed(1)} @</div></div>
+                  <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Total @ Vivo</div><div className="text-xl md:text-2xl font-bold">{indicadores.totalArrobasAtivas.toFixed(1)} @</div></div>
                   <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Média @/Animal</div><div className="text-xl md:text-2xl font-bold">{indicadores.animaisAtivos > 0 ? (indicadores.totalArrobasAtivas / indicadores.animaisAtivos).toFixed(1) : '0'} @</div></div>
                   <div className="bg-yellow-50 rounded-xl p-3 md:p-4 border-2 border-yellow-200"><div className="text-[10px] md:text-xs text-yellow-700 mb-1 font-medium">@ Mínimo p/ Lucro</div><div className="text-xl md:text-2xl font-bold text-yellow-700">{formatMoney(indicadores.valorMinimoArroba)}</div></div>
                 </div>
@@ -646,7 +675,7 @@ export default function Home() {
                   <div className="bg-blue-50 rounded-xl p-4 md:p-5"><div className="text-xs md:text-sm text-blue-600 mb-1">Rend. a.m. (só custos)</div><div className="text-2xl md:text-3xl font-bold text-blue-700">{dre.rendimentoSoCustos.toFixed(2)}%</div></div>
                   <div className="bg-green-50 rounded-xl p-4 md:p-5"><div className="text-xs md:text-sm text-green-600 mb-1">Rend. a.m. (c/ despesas)</div><div className="text-2xl md:text-3xl font-bold text-green-700">{dre.rendimentoComDespesas.toFixed(2)}%</div></div>
                 </div>
-                <div className="mt-3 md:mt-4 p-2 md:p-3 bg-gray-50 rounded-lg text-xs md:text-sm text-gray-600"><strong>Aportes:</strong> {formatMoney(dre.aportes)} • <strong>Período:</strong> {calcularDiasLote(loteAtual?.data_inicio)} dias</div>
+                <div className="mt-3 md:mt-4 p-2 md:p-3 bg-gray-50 rounded-lg text-xs md:text-sm text-gray-600"><strong>Aportes:</strong> {formatMoney(dre.aportes)} • <strong>Período:</strong> {calcularDiasLote(loteAtual?.data_inicio)} dias ({calcularMesesLote(loteAtual?.data_inicio)} meses)</div>
               </div>
             </div>
           </div>
@@ -661,7 +690,7 @@ export default function Home() {
             {loteAtual && (
               <div className="bg-gradient-to-br from-green-900 to-green-700 rounded-2xl md:rounded-3xl p-5 md:p-7 mb-6 text-white">
                 <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-5">
-                  <div><span className="bg-white/20 px-3 py-1 rounded-full text-xs font-medium">LOTE ATIVO</span><h3 className="text-xl md:text-2xl font-bold mt-2 md:mt-3">{loteAtual.nome}</h3><p className="opacity-80 text-sm md:text-base">{formatDate(loteAtual.data_inicio)} • {calcularDiasLote(loteAtual.data_inicio)} dias</p></div>
+                  <div><span className="bg-white/20 px-3 py-1 rounded-full text-xs font-medium">LOTE ATIVO</span><h3 className="text-xl md:text-2xl font-bold mt-2 md:mt-3">{loteAtual.nome}</h3><p className="opacity-80 text-sm md:text-base">{formatDate(loteAtual.data_inicio)} • {calcularDiasLote(loteAtual.data_inicio)} dias ({calcularMesesLote(loteAtual.data_inicio)} meses)</p></div>
                   <div className="text-left md:text-right"><div className="text-xs md:text-sm opacity-80 mb-1">Caixa Atual</div><div className="text-2xl md:text-3xl font-bold">{formatMoney(indicadores.caixaAtual)}</div></div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 p-4 md:p-5 bg-white/10 rounded-xl mb-4 md:mb-5">
@@ -683,24 +712,30 @@ export default function Home() {
             )}
             <h3 className="text-base md:text-lg font-semibold text-gray-500 mb-4">📚 Histórico</h3>
             <div className="space-y-3 md:space-y-4">
-              {lotes.filter(l => l.status === 'fechado').map(lote => (
-                <div key={lote.id} className="bg-white rounded-2xl p-4 md:p-6 shadow-lg">
-                  <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4">
-                    <h3 className="text-base md:text-lg font-semibold">{lote.nome}</h3>
-                    <div className="flex items-center gap-2">
-                      <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-medium">Fechado</span>
-                      <button onClick={async () => { const data = await loadLoteData(lote.id); setSelectedLote(data); setShowLoteDetalhes(true) }} className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-xs md:text-sm font-medium active:bg-green-200">📄 One-Page</button>
+              {lotes.filter(l => l.status === 'fechado').map(lote => {
+                const rend = calcularRendimentoLote(lote)
+                return (
+                  <div key={lote.id} className="bg-white rounded-2xl p-4 md:p-6 shadow-lg">
+                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4">
+                      <div>
+                        <h3 className="text-base md:text-lg font-semibold">{lote.nome}</h3>
+                        <div className="text-xs text-gray-500">{formatDate(lote.data_inicio)} - {formatDate(lote.data_fim)} • {calcularMesesLote(lote.data_inicio, lote.data_fim)} meses</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${rend.comDespesas >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{rend.comDespesas.toFixed(2)}% a.m.</span>
+                        <button onClick={async () => { const data = await loadLoteData(lote.id); setSelectedLote(data); setShowLoteDetalhes(true) }} className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-xs md:text-sm font-medium active:bg-green-200">📄 One-Page</button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-5 text-sm">
+                      <div><div className="text-[10px] md:text-xs text-gray-400 mb-1">Aportes</div><div className="font-semibold text-xs md:text-base">{formatMoney(lote.total_aportes)}</div></div>
+                      <div><div className="text-[10px] md:text-xs text-gray-400 mb-1">Vendas</div><div className="font-semibold text-green-600 text-xs md:text-base">{formatMoney(lote.total_vendas)}</div></div>
+                      <div className="hidden md:block"><div className="text-xs text-gray-400 mb-1">Custos</div><div className="font-semibold text-red-600">{formatMoney(lote.total_custos)}</div></div>
+                      <div className="hidden md:block"><div className="text-xs text-gray-400 mb-1">Res. Bruto</div><div className={`font-semibold ${(lote.resultado_bruto || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_bruto)}</div></div>
+                      <div><div className="text-[10px] md:text-xs text-gray-400 mb-1">Res. Líquido</div><div className={`font-semibold text-xs md:text-base ${(lote.resultado_liquido || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_liquido)}</div></div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-5 text-sm">
-                    <div><div className="text-[10px] md:text-xs text-gray-400 mb-1">Período</div><div className="font-medium text-xs md:text-base">{formatDate(lote.data_inicio)}</div><div className="text-[10px] md:text-xs text-gray-500">até {formatDate(lote.data_fim)}</div></div>
-                    <div><div className="text-[10px] md:text-xs text-gray-400 mb-1">Aportes</div><div className="font-semibold text-xs md:text-base">{formatMoney(lote.total_aportes)}</div></div>
-                    <div className="hidden md:block"><div className="text-xs text-gray-400 mb-1">Vendas</div><div className="font-semibold text-green-600">{formatMoney(lote.total_vendas)}</div></div>
-                    <div className="hidden md:block"><div className="text-xs text-gray-400 mb-1">Resultado Bruto</div><div className={`font-semibold ${(lote.resultado_bruto || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_bruto)}</div></div>
-                    <div><div className="text-[10px] md:text-xs text-gray-400 mb-1">Resultado</div><div className={`font-semibold text-xs md:text-base ${(lote.resultado_liquido || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_liquido)}</div></div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               {lotes.filter(l => l.status === 'fechado').length === 0 && <div className="bg-white rounded-2xl p-8 text-center text-gray-400 text-sm">Nenhum lote fechado</div>}
             </div>
           </div>
@@ -725,9 +760,7 @@ export default function Home() {
       </header>
       
       <div className="flex">
-        {/* Overlay para fechar menu mobile */}
         {mobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileMenuOpen(false)} />}
-        
         <nav className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-200 w-64 bg-white border-r border-gray-200 p-4 min-h-[calc(100vh-57px)] md:min-h-[calc(100vh-65px)] fixed md:sticky top-[57px] md:top-[65px] left-0 z-40`}>
           <NavItem page="dashboard" icon="📊" label="Lote Atual" />
           <NavItem page="lancamentos" icon="💳" label="Lançamentos" />
@@ -744,18 +777,9 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl md:rounded-3xl p-6 md:p-8 w-full max-w-md">
             <h3 className="text-xl font-bold mb-6">🐄 Criar Novo Lote</h3>
-            <div className="mb-5">
-              <label className="block mb-2 font-medium text-sm">Nome do Lote *</label>
-              <input type="text" value={novoLoteData.nome} onChange={(e) => setNovoLoteData({...novoLoteData, nome: e.target.value})} placeholder="Ex: Lote 2026.1" className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" />
-            </div>
-            <div className="mb-6">
-              <label className="block mb-2 font-medium text-sm">Data de Início *</label>
-              <input type="date" value={novoLoteData.data_inicio} onChange={(e) => setNovoLoteData({...novoLoteData, data_inicio: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" />
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowNovoLote(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button>
-              <button onClick={handleCriarNovoLote} className="flex-1 py-3 md:py-4 bg-green-900 text-white rounded-xl font-semibold active:bg-green-800">Criar Lote</button>
-            </div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Nome do Lote *</label><input type="text" value={novoLoteData.nome} onChange={(e) => setNovoLoteData({...novoLoteData, nome: e.target.value})} placeholder="Ex: Lote 2026.1" className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
+            <div className="mb-6"><label className="block mb-2 font-medium text-sm">Data de Início *</label><input type="date" value={novoLoteData.data_inicio} onChange={(e) => setNovoLoteData({...novoLoteData, data_inicio: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
+            <div className="flex gap-3"><button onClick={() => setShowNovoLote(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleCriarNovoLote} className="flex-1 py-3 md:py-4 bg-green-900 text-white rounded-xl font-semibold active:bg-green-800">Criar Lote</button></div>
           </div>
         </div>
       )}
@@ -765,18 +789,9 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl md:rounded-3xl p-6 md:p-8 w-full max-w-md">
             <h3 className="text-xl font-bold mb-6">✏️ Editar Lote</h3>
-            <div className="mb-5">
-              <label className="block mb-2 font-medium text-sm">Nome do Lote</label>
-              <input type="text" value={editandoLoteData.nome} onChange={(e) => setEditandoLoteData({...editandoLoteData, nome: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" />
-            </div>
-            <div className="mb-6">
-              <label className="block mb-2 font-medium text-sm">Data de Início</label>
-              <input type="date" value={editandoLoteData.data_inicio} onChange={(e) => setEditandoLoteData({...editandoLoteData, data_inicio: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" />
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowEditarLote(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button>
-              <button onClick={handleEditarLote} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button>
-            </div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Nome do Lote</label><input type="text" value={editandoLoteData.nome} onChange={(e) => setEditandoLoteData({...editandoLoteData, nome: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
+            <div className="mb-6"><label className="block mb-2 font-medium text-sm">Data de Início</label><input type="date" value={editandoLoteData.data_inicio} onChange={(e) => setEditandoLoteData({...editandoLoteData, data_inicio: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
+            <div className="flex gap-3"><button onClick={() => setShowEditarLote(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleEditarLote} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>
           </div>
         </div>
       )}
@@ -786,10 +801,21 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl md:rounded-3xl p-6 md:p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
             <h3 className="text-xl font-bold mb-6">💳 Novo Lançamento</h3>
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo</label><div className="grid grid-cols-2 gap-2">{['saida', 'aporte', 'infraestrutura', 'entrada'].map(t => (<button key={t} onClick={() => setNovoLancamento({...novoLancamento, tipo: t})} className={`px-3 py-3 rounded-xl border-2 text-sm font-medium active:scale-[0.98] ${novoLancamento.tipo === t ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200'}`}>{t === 'saida' ? '📤 Saída' : t === 'aporte' ? '📥 Aporte' : t === 'infraestrutura' ? '🔧 Infra' : '💰 Entrada'}</button>))}</div></div>
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={novoLancamento.categoria} onChange={(e) => setNovoLancamento({...novoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option>{novoLancamento.tipo === 'saida' && <><option value="compra_gado">Compra Gado</option><option value="racao">Ração</option><option value="medicamento">Medicamento</option><option value="frete">Frete</option><option value="outros">Outros</option></>}{novoLancamento.tipo === 'entrada' && <><option value="venda_gado">Venda Gado</option><option value="outros">Outros</option></>}{novoLancamento.tipo === 'aporte' && <option value="aporte">Aporte</option>}{novoLancamento.tipo === 'infraestrutura' && <option value="infraestrutura">Infraestrutura</option>}</select></div>
-            {novoLancamento.tipo === 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio</label><select value={novoLancamento.socio_id} onChange={(e) => setNovoLancamento({...novoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Descrição</label><input type="text" value={novoLancamento.descricao} onChange={(e) => setNovoLancamento({...novoLancamento, descricao: e.target.value})} placeholder="Ex: 5 sacos de ração" className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo</label><div className="grid grid-cols-2 gap-2">{['saida', 'aporte', 'infraestrutura', 'entrada'].map(t => (<button key={t} onClick={() => setNovoLancamento({...novoLancamento, tipo: t, categoria: t === 'aporte' ? 'aporte' : t === 'infraestrutura' ? 'infraestrutura' : '', subcategoria: ''})} className={`px-3 py-3 rounded-xl border-2 text-sm font-medium active:scale-[0.98] ${novoLancamento.tipo === t ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200'}`}>{t === 'saida' ? '📤 Saída' : t === 'aporte' ? '📥 Aporte' : t === 'infraestrutura' ? '🔧 Infra' : '💰 Entrada'}</button>))}</div></div>
+            {novoLancamento.tipo === 'aporte' && (
+              <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo de Aporte</label><div className="flex gap-2">
+                <button onClick={() => setNovoLancamento({...novoLancamento, subcategoria: 'aporte_inicial'})} className={`flex-1 px-3 py-2 rounded-lg border-2 text-sm ${novoLancamento.subcategoria === 'aporte_inicial' ? 'border-green-600 bg-green-50' : 'border-gray-200'}`}>Aporte Inicial</button>
+                <button onClick={() => setNovoLancamento({...novoLancamento, subcategoria: 'aporte_adicional'})} className={`flex-1 px-3 py-2 rounded-lg border-2 text-sm ${novoLancamento.subcategoria === 'aporte_adicional' ? 'border-green-600 bg-green-50' : 'border-gray-200'}`}>Aporte Adicional</button>
+              </div></div>
+            )}
+            {novoLancamento.tipo === 'saida' && (
+              <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={novoLancamento.categoria} onChange={(e) => setNovoLancamento({...novoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option><option value="compra_gado">Compra Gado</option><option value="racao">Ração</option><option value="medicamento">Medicamento</option><option value="frete">Frete</option><option value="outros">Outros</option></select></div>
+            )}
+            {novoLancamento.tipo === 'entrada' && (
+              <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={novoLancamento.categoria} onChange={(e) => setNovoLancamento({...novoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option><option value="venda_gado">Venda Gado</option><option value="outros">Outros</option></select></div>
+            )}
+            {novoLancamento.tipo === 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio *</label><select value={novoLancamento.socio_id} onChange={(e) => setNovoLancamento({...novoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione o sócio...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
+            {novoLancamento.tipo !== 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Descrição</label><input type="text" value={novoLancamento.descricao} onChange={(e) => setNovoLancamento({...novoLancamento, descricao: e.target.value})} placeholder="Ex: 5 sacos de ração" className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>}
             <div className="grid grid-cols-2 gap-3 md:gap-4 mb-5"><div><label className="block mb-2 font-medium text-sm">Valor (R$)</label><input type="number" inputMode="decimal" value={novoLancamento.valor} onChange={(e) => setNovoLancamento({...novoLancamento, valor: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div><div><label className="block mb-2 font-medium text-sm">Data</label><input type="date" value={novoLancamento.data} onChange={(e) => setNovoLancamento({...novoLancamento, data: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div></div>
             <div className="flex gap-3"><button onClick={() => setShowNewLancamento(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveLancamento} className="flex-1 py-3 md:py-4 bg-green-900 text-white rounded-xl font-semibold active:bg-green-800">Salvar</button></div>
           </div>
@@ -826,10 +852,10 @@ export default function Home() {
                 <div><label className="block mb-1 text-xs md:text-sm font-medium">Data Compra *</label><input type="date" value={novoAnimal.data_compra} onChange={(e) => setNovoAnimal({...novoAnimal, data_compra: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base" /></div>
               </div>
               <div className="bg-green-50 rounded-xl p-4 md:p-5 mb-4">
-                <h4 className="font-semibold text-green-900 text-sm mb-3 md:mb-4">⚖️ Peso e Valor</h4>
+                <h4 className="font-semibold text-green-900 text-sm mb-3 md:mb-4">⚖️ Arroba e Valor (Boi Vivo - 1@ = 15kg)</h4>
                 <div className="grid grid-cols-3 gap-3 md:gap-4">
-                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Peso (kg) *</label><input type="number" inputMode="decimal" value={novoAnimal.peso_compra} onChange={(e) => setNovoAnimal({...novoAnimal, peso_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
-                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Arrobas</label><input type="text" value={novoAnimal.peso_compra ? (parseFloat(novoAnimal.peso_compra) / 15).toFixed(2) + ' @' : ''} disabled className="w-full p-3 border-2 border-green-200 rounded-lg bg-gray-100 text-base" /></div>
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Arroba (@) *</label><input type="number" inputMode="decimal" step="0.01" value={novoAnimal.arroba_compra} onChange={(e) => setNovoAnimal({...novoAnimal, arroba_compra: e.target.value})} placeholder="Ex: 14.5" className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Peso (kg)</label><input type="text" value={novoAnimal.arroba_compra ? (parseFloat(novoAnimal.arroba_compra) * 15).toFixed(1) + ' kg' : ''} disabled className="w-full p-3 border-2 border-green-200 rounded-lg bg-gray-100 text-base" /></div>
                   <div><label className="block mb-1 text-xs md:text-sm font-medium">Valor (R$) *</label><input type="number" inputMode="decimal" value={novoAnimal.valor_compra} onChange={(e) => setNovoAnimal({...novoAnimal, valor_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
                 </div>
               </div>
@@ -854,10 +880,10 @@ export default function Home() {
             </div>
             <div className="p-4 md:p-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-                <div className="bg-green-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-green-600 mb-1 font-medium">PESO INICIAL</div><div className="text-lg md:text-2xl font-bold text-green-900">{selectedAnimal.peso_compra} kg</div><div className="text-xs text-gray-500">{selectedAnimal.arroba_compra} @</div></div>
-                <div className="bg-blue-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-blue-600 mb-1 font-medium">PESO ATUAL</div><div className="text-lg md:text-2xl font-bold text-blue-900">{selectedAnimal.peso_atual} kg</div><div className="text-xs text-blue-500">{selectedAnimal.arroba_atual} @</div></div>
-                <div className="bg-orange-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-orange-600 mb-1 font-medium">GANHO</div><div className="text-lg md:text-2xl font-bold text-orange-600">+{((parseFloat(selectedAnimal.peso_atual) || 0) - (parseFloat(selectedAnimal.peso_compra) || 0)).toFixed(1)} kg</div></div>
-                <div className="bg-purple-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-purple-600 mb-1 font-medium">GMD</div><div className="text-lg md:text-2xl font-bold text-purple-900">{(() => { const g = (parseFloat(selectedAnimal.peso_atual) || 0) - (parseFloat(selectedAnimal.peso_compra) || 0); const d = calcularDiasLote(loteAtual?.data_inicio); return d > 0 ? (g / d).toFixed(3) : '0.000' })()} kg/dia</div></div>
+                <div className="bg-green-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-green-600 mb-1 font-medium">@ COMPRA (VIVO)</div><div className="text-lg md:text-2xl font-bold text-green-900">{selectedAnimal.arroba_compra} @</div><div className="text-xs text-gray-500">{selectedAnimal.peso_compra} kg</div></div>
+                <div className="bg-blue-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-blue-600 mb-1 font-medium">@ ATUAL (VIVO)</div><div className="text-lg md:text-2xl font-bold text-blue-900">{selectedAnimal.arroba_atual} @</div><div className="text-xs text-blue-500">{selectedAnimal.peso_atual} kg</div></div>
+                <div className="bg-orange-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-orange-600 mb-1 font-medium">GANHO @</div><div className="text-lg md:text-2xl font-bold text-orange-600">+{((parseFloat(selectedAnimal.arroba_atual) || 0) - (parseFloat(selectedAnimal.arroba_compra) || 0)).toFixed(2)} @</div></div>
+                <div className="bg-purple-50 rounded-xl md:rounded-2xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-purple-600 mb-1 font-medium">GMD</div><div className="text-lg md:text-2xl font-bold text-purple-900">{(() => { const g = ((parseFloat(selectedAnimal.arroba_atual) || 0) - (parseFloat(selectedAnimal.arroba_compra) || 0)) * ARROBA_VIVO; const d = calcularDiasLote(loteAtual?.data_inicio); return d > 0 ? (g / d).toFixed(3) : '0.000' })()} kg/dia</div></div>
               </div>
               <div className="grid md:grid-cols-2 gap-4 md:gap-6">
                 <div>
@@ -874,17 +900,17 @@ export default function Home() {
                     <div className="flex justify-between"><span className="text-gray-500">Sexo</span><span className="font-medium">{selectedAnimal.sexo}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Data Compra</span><span className="font-medium">{formatDate(selectedAnimal.data_compra)}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Valor Compra</span><span className="font-medium">{formatMoney(selectedAnimal.valor_compra)}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Custo por @</span><span className="font-medium">{formatMoney(selectedAnimal.valor_compra / selectedAnimal.arroba_compra)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">R$ por @</span><span className="font-medium">{formatMoney(selectedAnimal.valor_compra / selectedAnimal.arroba_compra)}</span></div>
                   </div>
                 </div>
                 <div>
-                  <div className="flex justify-between items-center mb-3 md:mb-4"><h3 className="font-semibold text-green-900 text-sm md:text-base">⚖️ Pesagens</h3>{selectedAnimal.status === 'ativo' && <button onClick={() => setShowAddPesagem(true)} className="px-3 py-2 bg-green-900 text-white rounded-lg text-xs md:text-sm font-medium active:bg-green-800">+ Nova</button>}</div>
+                  <div className="flex justify-between items-center mb-3 md:mb-4"><h3 className="font-semibold text-green-900 text-sm md:text-base">⚖️ Pesagens (@ Vivo)</h3>{selectedAnimal.status === 'ativo' && <button onClick={() => setShowAddPesagem(true)} className="px-3 py-2 bg-green-900 text-white rounded-lg text-xs md:text-sm font-medium active:bg-green-800">+ Nova</button>}</div>
                   <div className="bg-white border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
-                    <div className="grid grid-cols-4 p-2 md:p-3 bg-gray-50 text-[10px] md:text-xs font-semibold text-gray-500 sticky top-0"><div>DATA</div><div>PESO</div><div>OBS</div><div>AÇÕES</div></div>
+                    <div className="grid grid-cols-4 p-2 md:p-3 bg-gray-50 text-[10px] md:text-xs font-semibold text-gray-500 sticky top-0"><div>DATA</div><div>@</div><div>OBS</div><div>AÇÕES</div></div>
                     {getPesagensAnimal(selectedAnimal.id).map((p, idx) => (
                       <div key={idx} className="grid grid-cols-4 p-2 md:p-3 border-t border-gray-100 text-xs md:text-sm items-center">
                         <div className="text-[10px] md:text-xs">{formatDate(p.data)}</div>
-                        <div className="font-semibold text-xs md:text-sm">{p.peso} kg</div>
+                        <div className="font-semibold text-xs md:text-sm">{p.arroba} @</div>
                         <div className="text-gray-500 truncate text-[10px] md:text-xs">{p.observacao || '-'}</div>
                         <div className="flex gap-1"><button onClick={() => handleEditPesagem(p)} className="p-1 text-blue-600 active:bg-blue-50 rounded">✏️</button><button onClick={() => handleDeletePesagem(p.id)} className="p-1 text-red-600 active:bg-red-50 rounded">🗑️</button></div>
                       </div>
@@ -894,9 +920,9 @@ export default function Home() {
               </div>
               {selectedAnimal.status === 'ativo' ? (
                 <div className="mt-6 p-4 md:p-5 bg-yellow-50 rounded-xl border-2 border-dashed border-yellow-400">
-                  <h4 className="font-semibold text-yellow-700 mb-3 md:mb-4 text-sm md:text-base">🏷️ Registrar Venda</h4>
-                  <form onSubmit={(e) => { e.preventDefault(); handleVendaAnimal(selectedAnimal.id, e.target.pesoVenda.value, e.target.valorVenda.value, e.target.dataVenda.value) }} className="flex flex-col md:flex-row flex-wrap gap-3">
-                    <input name="pesoVenda" type="number" inputMode="decimal" step="0.01" placeholder="Peso (kg)" required className="p-3 border border-gray-200 rounded-lg flex-1 min-w-[100px] text-base" />
+                  <h4 className="font-semibold text-yellow-700 mb-3 md:mb-4 text-sm md:text-base">🏷️ Registrar Venda (@ Morto - 1@ = 30kg)</h4>
+                  <form onSubmit={(e) => { e.preventDefault(); handleVendaAnimal(selectedAnimal.id, e.target.arrobaVenda.value, e.target.valorVenda.value, e.target.dataVenda.value) }} className="flex flex-col md:flex-row flex-wrap gap-3">
+                    <input name="arrobaVenda" type="number" inputMode="decimal" step="0.01" placeholder="Arroba (@)" required className="p-3 border border-gray-200 rounded-lg flex-1 min-w-[100px] text-base" />
                     <input name="valorVenda" type="number" inputMode="decimal" step="0.01" placeholder="Valor (R$)" required className="p-3 border border-gray-200 rounded-lg flex-1 min-w-[100px] text-base" />
                     <input name="dataVenda" type="date" required className="p-3 border border-gray-200 rounded-lg text-base" />
                     <button type="submit" className="px-6 py-3 bg-yellow-500 text-white rounded-lg font-semibold active:bg-yellow-600 w-full md:w-auto">Registrar</button>
@@ -904,9 +930,9 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="mt-6 p-4 md:p-5 bg-blue-50 rounded-xl border-2 border-blue-200">
-                  <h4 className="font-semibold text-blue-700 mb-3 md:mb-4 text-sm md:text-base">💰 Dados da Venda</h4>
+                  <h4 className="font-semibold text-blue-700 mb-3 md:mb-4 text-sm md:text-base">💰 Dados da Venda (@ Morto)</h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
-                    <div><div className="text-[10px] md:text-xs text-gray-500">Peso</div><div className="font-bold text-sm md:text-base">{selectedAnimal.peso_venda} kg</div></div>
+                    <div><div className="text-[10px] md:text-xs text-gray-500">@ Venda</div><div className="font-bold text-sm md:text-base">{selectedAnimal.arroba_venda} @</div></div>
                     <div><div className="text-[10px] md:text-xs text-gray-500">Valor</div><div className="font-bold text-green-600 text-sm md:text-base">{formatMoney(selectedAnimal.valor_venda)}</div></div>
                     <div><div className="text-[10px] md:text-xs text-gray-500">Data</div><div className="font-bold text-sm md:text-base">{formatDate(selectedAnimal.data_venda)}</div></div>
                     <div><div className="text-[10px] md:text-xs text-gray-500">Resultado</div><div className={`font-bold text-sm md:text-base ${(selectedAnimal.valor_venda - selectedAnimal.valor_compra) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(selectedAnimal.valor_venda - selectedAnimal.valor_compra)}</div></div>
@@ -923,9 +949,9 @@ export default function Home() {
       {showAddPesagem && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-md">
-            <h3 className="text-xl font-bold mb-6">⚖️ Nova Pesagem</h3>
+            <h3 className="text-xl font-bold mb-6">⚖️ Nova Pesagem (@ Vivo)</h3>
             <div className="mb-4"><label className="block mb-2 text-sm font-medium">Data</label><input type="date" value={novaPesagem.data} onChange={(e) => setNovaPesagem({...novaPesagem, data: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
-            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Peso (kg)</label><input type="number" inputMode="decimal" step="0.01" value={novaPesagem.peso} onChange={(e) => setNovaPesagem({...novaPesagem, peso: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /><div className="text-xs text-gray-500 mt-1">= {novaPesagem.peso ? (parseFloat(novaPesagem.peso) / 15).toFixed(2) : '0.00'} @</div></div>
+            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Arroba (@)</label><input type="number" inputMode="decimal" step="0.01" value={novaPesagem.arroba} onChange={(e) => setNovaPesagem({...novaPesagem, arroba: e.target.value})} placeholder="Ex: 15.5" className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /><div className="text-xs text-gray-500 mt-1">= {novaPesagem.arroba ? (parseFloat(novaPesagem.arroba) * 15).toFixed(1) : '0'} kg</div></div>
             <div className="mb-6"><label className="block mb-2 text-sm font-medium">Observação</label><input type="text" value={novaPesagem.observacao} onChange={(e) => setNovaPesagem({...novaPesagem, observacao: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
             <div className="flex gap-3"><button onClick={() => setShowAddPesagem(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSavePesagem} className="flex-1 py-3 md:py-4 bg-green-900 text-white rounded-xl font-semibold active:bg-green-800">Salvar</button></div>
           </div>
@@ -938,22 +964,9 @@ export default function Home() {
           <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-md">
             <h3 className="text-xl font-bold mb-6">✏️ Editar Pesagem</h3>
             <div className="mb-4"><label className="block mb-2 text-sm font-medium">Data</label><input type="date" value={editandoPesagem.data} onChange={(e) => setEditandoPesagem({...editandoPesagem, data: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
-            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Peso (kg)</label><input type="number" inputMode="decimal" step="0.01" value={editandoPesagem.peso} onChange={(e) => setEditandoPesagem({...editandoPesagem, peso: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
+            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Arroba (@)</label><input type="number" inputMode="decimal" step="0.01" value={editandoPesagem.arroba} onChange={(e) => setEditandoPesagem({...editandoPesagem, arroba: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
             <div className="mb-6"><label className="block mb-2 text-sm font-medium">Observação</label><input type="text" value={editandoPesagem.observacao || ''} onChange={(e) => setEditandoPesagem({...editandoPesagem, observacao: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
             <div className="flex gap-3"><button onClick={() => { setShowEditPesagem(false); setEditandoPesagem(null) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveEditPesagem} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Editar Venda */}
-      {showEditVenda && editandoVenda && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-md">
-            <h3 className="text-xl font-bold mb-6">✏️ Editar Venda</h3>
-            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Peso (kg)</label><input type="number" inputMode="decimal" step="0.01" value={editandoVenda.peso_venda} onChange={(e) => setEditandoVenda({...editandoVenda, peso_venda: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
-            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Valor (R$)</label><input type="number" inputMode="decimal" step="0.01" value={editandoVenda.valor_venda} onChange={(e) => setEditandoVenda({...editandoVenda, valor_venda: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
-            <div className="mb-6"><label className="block mb-2 text-sm font-medium">Data</label><input type="date" value={editandoVenda.data_venda} onChange={(e) => setEditandoVenda({...editandoVenda, data_venda: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
-            <div className="flex gap-3"><button onClick={() => { setShowEditVenda(false); setEditandoVenda(null) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveEditVenda} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>
           </div>
         </div>
       )}
@@ -973,16 +986,28 @@ export default function Home() {
                 <div><label className="block mb-1 text-xs md:text-sm font-medium">Data Compra *</label><input type="date" value={editandoAnimal.data_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, data_compra: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base" /></div>
               </div>
               <div className="bg-green-50 rounded-xl p-4 md:p-5 mb-4">
-                <h4 className="font-semibold text-green-900 text-sm mb-3 md:mb-4">⚖️ Peso e Valor de Compra</h4>
+                <h4 className="font-semibold text-green-900 text-sm mb-3 md:mb-4">⚖️ Arroba e Valor de Compra</h4>
                 <div className="grid grid-cols-3 gap-3 md:gap-4">
-                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Peso (kg) *</label><input type="number" inputMode="decimal" value={editandoAnimal.peso_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, peso_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
-                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Arrobas</label><input type="text" value={editandoAnimal.peso_compra ? (parseFloat(editandoAnimal.peso_compra) / 15).toFixed(2) + ' @' : ''} disabled className="w-full p-3 border-2 border-green-200 rounded-lg bg-gray-100 text-base" /></div>
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Arroba (@) *</label><input type="number" inputMode="decimal" step="0.01" value={editandoAnimal.arroba_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, arroba_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Peso (kg)</label><input type="text" value={editandoAnimal.arroba_compra ? (parseFloat(editandoAnimal.arroba_compra) * 15).toFixed(1) + ' kg' : ''} disabled className="w-full p-3 border-2 border-green-200 rounded-lg bg-gray-100 text-base" /></div>
                   <div><label className="block mb-1 text-xs md:text-sm font-medium">Valor (R$) *</label><input type="number" inputMode="decimal" value={editandoAnimal.valor_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, valor_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
                 </div>
               </div>
-              <div className="mb-4"><label className="block mb-1 text-xs md:text-sm font-medium">Observações</label><textarea value={editandoAnimal.observacoes} onChange={(e) => setEditandoAnimal({...editandoAnimal, observacoes: e.target.value})} rows={2} className="w-full p-3 border-2 border-gray-200 rounded-lg resize-none text-base" /></div>
               <div className="flex gap-3"><button onClick={() => { setShowEditAnimal(false); setEditandoAnimal(null) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveEditAnimal} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Venda */}
+      {showEditVenda && editandoVenda && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-md">
+            <h3 className="text-xl font-bold mb-6">✏️ Editar Venda (@ Morto)</h3>
+            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Arroba (@)</label><input type="number" inputMode="decimal" step="0.01" value={editandoVenda.arroba_venda} onChange={(e) => setEditandoVenda({...editandoVenda, arroba_venda: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
+            <div className="mb-4"><label className="block mb-2 text-sm font-medium">Valor (R$)</label><input type="number" inputMode="decimal" step="0.01" value={editandoVenda.valor_venda} onChange={(e) => setEditandoVenda({...editandoVenda, valor_venda: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
+            <div className="mb-6"><label className="block mb-2 text-sm font-medium">Data</label><input type="date" value={editandoVenda.data_venda} onChange={(e) => setEditandoVenda({...editandoVenda, data_venda: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-lg text-base" /></div>
+            <div className="flex gap-3"><button onClick={() => { setShowEditVenda(false); setEditandoVenda(null) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveEditVenda} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>
           </div>
         </div>
       )}
@@ -996,62 +1021,146 @@ export default function Home() {
               <h4 className="font-semibold text-green-900 mb-3 md:mb-4 text-sm md:text-base">Resumo: {loteAtual?.nome}</h4>
               <div className="grid grid-cols-2 gap-3 md:gap-4 text-xs md:text-sm">
                 <div><span className="text-gray-500">Período:</span> <span className="font-medium">{formatDate(loteAtual?.data_inicio)} - {formatDate(dataFechamento)}</span></div>
-                <div><span className="text-gray-500">Duração:</span> <span className="font-medium">{calcularDiasLote(loteAtual?.data_inicio)} dias</span></div>
+                <div><span className="text-gray-500">Duração:</span> <span className="font-medium">{calcularDiasLote(loteAtual?.data_inicio, dataFechamento)} dias ({calcularMesesLote(loteAtual?.data_inicio, dataFechamento)} meses)</span></div>
                 <div><span className="text-gray-500">Animais:</span> <span className="font-medium">{animais.length}</span></div>
                 <div><span className="text-gray-500">Aportes:</span> <span className="font-medium">{formatMoney(indicadores.totalAportes)}</span></div>
               </div>
             </div>
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm md:text-base">📅 Data de Fechamento</label><input type="date" value={dataFechamento} onChange={(e) => setDataFechamento(e.target.value)} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /><p className="text-xs text-gray-500 mt-2">Informe a data real em que o lote foi encerrado.</p></div>
-            <div className="mb-6"><label className="block mb-2 font-medium text-sm md:text-base">📝 Observações do Lote</label><textarea value={observacoesFechamento} onChange={(e) => setObservacoesFechamento(e.target.value)} placeholder="Registre acontecimentos importantes..." rows={4} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl resize-none text-base" /><p className="text-xs text-gray-500 mt-2">Essas observações ficarão no histórico.</p></div>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 md:p-4 mb-6"><p className="text-xs md:text-sm text-yellow-800"><strong>⚠️</strong> Ao fechar, você confirma que todos os lançamentos estão corretos.</p></div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm md:text-base">📅 Data de Fechamento</label><input type="date" value={dataFechamento} onChange={(e) => setDataFechamento(e.target.value)} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /><p className="text-xs text-gray-500 mt-2">Informe a data real do encerramento.</p></div>
+            <div className="mb-6"><label className="block mb-2 font-medium text-sm md:text-base">📝 Observações do Lote</label><textarea value={observacoesFechamento} onChange={(e) => setObservacoesFechamento(e.target.value)} placeholder="Registre acontecimentos importantes..." rows={4} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl resize-none text-base" /></div>
             <div className="flex gap-3"><button onClick={() => { setShowFecharLote(false); setObservacoesFechamento(''); setDataFechamento(new Date().toISOString().split('T')[0]) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleFecharLote} className="flex-1 py-3 md:py-4 bg-orange-500 text-white rounded-xl font-semibold active:bg-orange-600">Confirmar</button></div>
           </div>
         </div>
       )}
 
       {/* Modal: Detalhes do Lote (One-Page) */}
-      {showLoteDetalhes && selectedLote && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2 md:p-4">
-          <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-4xl max-h-[95vh] overflow-auto">
-            <div className="bg-gradient-to-r from-gray-800 to-gray-600 p-4 md:p-6 text-white sticky top-0 z-10">
-              <div className="flex justify-between items-start">
-                <div><span className="bg-white/20 px-3 py-1 rounded-full text-xs font-medium">LOTE FECHADO</span><h2 className="text-xl md:text-2xl font-bold mt-2">{selectedLote.lote?.nome}</h2><p className="opacity-80 text-xs md:text-sm">{formatDate(selectedLote.lote?.data_inicio)} - {formatDate(selectedLote.lote?.data_fim)} • {calcularDiasLote(selectedLote.lote?.data_inicio, selectedLote.lote?.data_fim)} dias</p></div>
-                <button onClick={() => { setShowLoteDetalhes(false); setSelectedLote(null) }} className="w-9 h-9 md:w-10 md:h-10 bg-white/20 rounded-full text-lg md:text-xl active:bg-white/30">✕</button>
+      {showLoteDetalhes && selectedLote && (() => {
+        const lote = selectedLote.lote
+        const animaisLote = selectedLote.animais || []
+        const lancamentosLote = selectedLote.lancamentos || []
+        const dias = calcularDiasLote(lote?.data_inicio, lote?.data_fim)
+        const meses = (dias / 30).toFixed(1)
+        
+        // Calcular totais dos lançamentos
+        const totalAportes = lancamentosLote.filter(l => l.tipo === 'aporte').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
+        const totalVendas = lancamentosLote.filter(l => l.tipo === 'entrada').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
+        const totalCustos = lancamentosLote.filter(l => l.tipo === 'saida').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+        const totalDespesas = lancamentosLote.filter(l => l.tipo === 'infraestrutura').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+        const resultadoBruto = totalVendas - totalCustos
+        const resultadoLiquido = resultadoBruto - totalDespesas
+        
+        // Rendimentos
+        const mesesNum = dias / 30
+        const rendSoCustos = mesesNum > 0 && totalAportes > 0 ? ((resultadoBruto / totalAportes) / mesesNum) * 100 : 0
+        const rendComDespesas = mesesNum > 0 && totalAportes > 0 ? ((resultadoLiquido / totalAportes) / mesesNum) * 100 : 0
+        
+        // Arrobas - compra é vivo (15kg), venda é morto (30kg)
+        const totalArrobaCompra = animaisLote.reduce((a, x) => a + parseFloat(x.arroba_compra || 0), 0)
+        const totalArrobaVenda = animaisLote.reduce((a, x) => a + parseFloat(x.arroba_venda || 0), 0)
+        const lucroGado = animaisLote.reduce((a, x) => a + (parseFloat(x.valor_venda || 0) - parseFloat(x.valor_compra || 0)), 0)
+        
+        // URL compartilhável
+        const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/lote/${lote?.id}` : ''
+        
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2 md:p-4">
+            <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-4xl max-h-[95vh] overflow-auto">
+              <div className="bg-gradient-to-r from-gray-800 to-gray-600 p-4 md:p-6 text-white sticky top-0 z-10">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="bg-white/20 px-3 py-1 rounded-full text-xs font-medium">LOTE FECHADO</span>
+                    <h2 className="text-xl md:text-2xl font-bold mt-2">{lote?.nome}</h2>
+                    <p className="opacity-80 text-xs md:text-sm">{formatDate(lote?.data_inicio)} - {formatDate(lote?.data_fim)} • {dias} dias ({meses} meses)</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert('Link copiado!') }} className="w-9 h-9 md:w-10 md:h-10 bg-white/20 rounded-full text-lg active:bg-white/30" title="Copiar link">🔗</button>
+                    <button onClick={() => { setShowLoteDetalhes(false); setSelectedLote(null) }} className="w-9 h-9 md:w-10 md:h-10 bg-white/20 rounded-full text-lg md:text-xl active:bg-white/30">✕</button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="p-4 md:p-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-                <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-blue-600 mb-1">Aportes</div><div className="text-lg md:text-xl font-bold text-blue-900">{formatMoney(selectedLote.lote?.total_aportes)}</div></div>
-                <div className="bg-green-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-green-600 mb-1">Vendas</div><div className="text-lg md:text-xl font-bold text-green-900">{formatMoney(selectedLote.lote?.total_vendas)}</div></div>
-                <div className="bg-red-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-red-600 mb-1">Custos</div><div className="text-lg md:text-xl font-bold text-red-900">{formatMoney(selectedLote.lote?.total_custos)}</div></div>
-                <div className={`rounded-xl p-3 md:p-4 text-center ${(selectedLote.lote?.resultado_liquido || 0) >= 0 ? 'bg-green-100' : 'bg-red-100'}`}><div className="text-[10px] md:text-xs text-gray-600 mb-1">Resultado</div><div className={`text-lg md:text-xl font-bold ${(selectedLote.lote?.resultado_liquido || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatMoney(selectedLote.lote?.resultado_liquido)}</div></div>
-              </div>
-              <div className="bg-white border rounded-xl p-4 md:p-5 mb-6">
-                <h3 className="font-semibold text-gray-700 mb-3 md:mb-4 text-sm md:text-base">🐄 Animais ({selectedLote.animais?.length})</h3>
+              <div className="p-4 md:p-6">
+                {/* Indicadores principais */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
-                  <div><div className="text-[10px] md:text-xs text-gray-500">@ Compradas</div><div className="text-lg md:text-xl font-bold">{selectedLote.animais?.reduce((a, x) => a + parseFloat(x.arroba_compra || 0), 0).toFixed(2)} @</div></div>
-                  <div><div className="text-[10px] md:text-xs text-gray-500">@ Vendidas</div><div className="text-lg md:text-xl font-bold">{selectedLote.animais?.reduce((a, x) => a + parseFloat(x.arroba_venda || 0), 0).toFixed(2)} @</div></div>
-                  <div><div className="text-[10px] md:text-xs text-gray-500">Ganho @</div><div className="text-lg md:text-xl font-bold text-green-600">+{(selectedLote.animais?.reduce((a, x) => a + parseFloat(x.arroba_venda || 0), 0) - selectedLote.animais?.reduce((a, x) => a + parseFloat(x.arroba_compra || 0), 0)).toFixed(2)} @</div></div>
-                  <div><div className="text-[10px] md:text-xs text-gray-500">Lucro Gado</div><div className="text-lg md:text-xl font-bold text-green-600">{formatMoney(selectedLote.animais?.reduce((a, x) => a + (parseFloat(x.valor_venda || 0) - parseFloat(x.valor_compra || 0)), 0))}</div></div>
+                  <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-blue-600 mb-1">Aportes</div><div className="text-lg md:text-xl font-bold text-blue-900">{formatMoney(totalAportes)}</div></div>
+                  <div className="bg-green-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-green-600 mb-1">Vendas</div><div className="text-lg md:text-xl font-bold text-green-900">{formatMoney(totalVendas)}</div></div>
+                  <div className="bg-red-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-red-600 mb-1">Custos</div><div className="text-lg md:text-xl font-bold text-red-900">{formatMoney(totalCustos)}</div></div>
+                  <div className="bg-orange-50 rounded-xl p-3 md:p-4 text-center"><div className="text-[10px] md:text-xs text-orange-600 mb-1">Despesas</div><div className="text-lg md:text-xl font-bold text-orange-900">{formatMoney(totalDespesas)}</div></div>
                 </div>
-                <div className="space-y-2 max-h-40 overflow-auto">
-                  {selectedLote.animais?.map(a => (
-                    <div key={a.id} className="flex flex-col md:flex-row md:justify-between md:items-center p-2 bg-gray-50 rounded-lg text-xs md:text-sm gap-1">
-                      <span className="font-medium">{a.nome}</span>
-                      <div className="flex gap-2 md:gap-4 text-[10px] md:text-xs"><span>Compra: {formatMoney(a.valor_compra)}</span><span>Venda: {formatMoney(a.valor_venda)}</span><span className={`font-medium ${(a.valor_venda - a.valor_compra) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(a.valor_venda - a.valor_compra)}</span></div>
+                
+                {/* Resultados */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4 mb-6">
+                  <div className={`rounded-xl p-4 text-center ${resultadoBruto >= 0 ? 'bg-blue-100' : 'bg-red-100'}`}>
+                    <div className="text-xs text-gray-600 mb-1">Resultado Bruto</div>
+                    <div className={`text-xl md:text-2xl font-bold ${resultadoBruto >= 0 ? 'text-blue-700' : 'text-red-700'}`}>{formatMoney(resultadoBruto)}</div>
+                  </div>
+                  <div className={`rounded-xl p-4 text-center ${resultadoLiquido >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
+                    <div className="text-xs text-gray-600 mb-1">Resultado Líquido</div>
+                    <div className={`text-xl md:text-2xl font-bold ${resultadoLiquido >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatMoney(resultadoLiquido)}</div>
+                  </div>
+                </div>
+                
+                {/* Rendimento */}
+                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-4 md:p-5 mb-6">
+                  <h3 className="font-semibold text-purple-800 mb-3 text-sm md:text-base">📈 Rendimento dos Aportes</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-600 mb-1">Só Custos</div>
+                      <div className={`text-2xl md:text-3xl font-bold ${rendSoCustos >= 0 ? 'text-purple-700' : 'text-red-600'}`}>{rendSoCustos.toFixed(2)}%</div>
+                      <div className="text-xs text-gray-500">ao mês</div>
                     </div>
-                  ))}
+                    <div className="text-center">
+                      <div className="text-xs text-gray-600 mb-1">Com Despesas</div>
+                      <div className={`text-2xl md:text-3xl font-bold ${rendComDespesas >= 0 ? 'text-indigo-700' : 'text-red-600'}`}>{rendComDespesas.toFixed(2)}%</div>
+                      <div className="text-xs text-gray-500">ao mês</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 md:p-5">
-                <h3 className="font-semibold text-yellow-800 mb-3 text-sm md:text-base">📝 Observações</h3>
-                <textarea value={selectedLote.lote?.observacoes || ''} onChange={(e) => setSelectedLote({...selectedLote, lote: {...selectedLote.lote, observacoes: e.target.value}})} placeholder="Adicione observações..." rows={4} className="w-full p-3 border border-yellow-300 rounded-lg bg-white resize-none text-base" />
-                <button onClick={() => handleSaveObservacoesLote(selectedLote.lote.id, selectedLote.lote.observacoes)} className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-lg text-sm font-medium active:bg-yellow-600">Salvar</button>
+
+                {/* Animais */}
+                <div className="bg-white border rounded-xl p-4 md:p-5 mb-6">
+                  <h3 className="font-semibold text-gray-700 mb-3 md:mb-4 text-sm md:text-base">🐄 Animais ({animaisLote.length})</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
+                    <div><div className="text-[10px] md:text-xs text-gray-500">@ Compra (Vivo)</div><div className="text-lg md:text-xl font-bold">{totalArrobaCompra.toFixed(2)} @</div></div>
+                    <div><div className="text-[10px] md:text-xs text-gray-500">@ Venda (Morto)</div><div className="text-lg md:text-xl font-bold">{totalArrobaVenda.toFixed(2)} @</div></div>
+                    <div><div className="text-[10px] md:text-xs text-gray-500">Rend. Carcaça</div><div className="text-lg md:text-xl font-bold text-blue-600">{totalArrobaCompra > 0 ? ((totalArrobaVenda / totalArrobaCompra) * 100).toFixed(1) : 0}%</div></div>
+                    <div><div className="text-[10px] md:text-xs text-gray-500">Lucro Gado</div><div className="text-lg md:text-xl font-bold text-green-600">{formatMoney(lucroGado)}</div></div>
+                  </div>
+                  <div className="space-y-2 max-h-40 overflow-auto">
+                    {animaisLote.map(a => (
+                      <div key={a.id} className="flex flex-col md:flex-row md:justify-between md:items-center p-2 bg-gray-50 rounded-lg text-xs md:text-sm gap-1">
+                        <span className="font-medium">{a.nome}</span>
+                        <div className="flex gap-2 md:gap-4 text-[10px] md:text-xs">
+                          <span>Compra: {formatMoney(a.valor_compra)}</span>
+                          <span>Venda: {formatMoney(a.valor_venda)}</span>
+                          <span className={`font-medium ${(a.valor_venda - a.valor_compra) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(a.valor_venda - a.valor_compra)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Observações */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 md:p-5">
+                  <h3 className="font-semibold text-yellow-800 mb-3 text-sm md:text-base">📝 Observações</h3>
+                  <textarea 
+                    value={selectedLote.lote?.observacoes || ''} 
+                    onChange={(e) => setSelectedLote({...selectedLote, lote: {...selectedLote.lote, observacoes: e.target.value}})} 
+                    placeholder="Adicione observações sobre o lote..." 
+                    rows={4} 
+                    className="w-full p-3 border border-yellow-300 rounded-lg bg-white resize-none text-base" 
+                  />
+                  <button 
+                    onClick={() => handleSaveObservacoesLote(selectedLote.lote.id, selectedLote.lote?.observacoes || '')} 
+                    className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-lg text-sm font-medium active:bg-yellow-600"
+                  >
+                    💾 Salvar Observações
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

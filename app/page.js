@@ -40,6 +40,10 @@ export default function Home() {
     rateio_lote: true
   })
   
+  // Estado para edição de lançamento
+  const [editandoLancamento, setEditandoLancamento] = useState(null)
+  const [showEditLancamento, setShowEditLancamento] = useState(false)
+  
   // Estado do formulário de novo animal
   const [novoAnimal, setNovoAnimal] = useState({
     nome: '',
@@ -191,6 +195,68 @@ export default function Home() {
         socio_id: '',
         rateio_lote: true
       })
+      await loadAllData()
+    }
+  }
+
+  // Função para abrir modal de edição
+  const handleEditLancamento = (lancamento) => {
+    setEditandoLancamento({
+      ...lancamento,
+      valor: Math.abs(lancamento.valor).toString()
+    })
+    setShowEditLancamento(true)
+  }
+
+  // Função para salvar edição do lançamento
+  const handleSaveEditLancamento = async () => {
+    if (!editandoLancamento.categoria || !editandoLancamento.valor || !editandoLancamento.data) {
+      alert('Preencha todos os campos obrigatórios!')
+      return
+    }
+    
+    let valorFinal = parseFloat(editandoLancamento.valor)
+    if (editandoLancamento.tipo === 'saida' || editandoLancamento.tipo === 'infraestrutura') {
+      valorFinal = -Math.abs(valorFinal)
+    } else {
+      valorFinal = Math.abs(valorFinal)
+    }
+    
+    const { error } = await supabase
+      .from('lancamentos')
+      .update({
+        tipo: editandoLancamento.tipo,
+        categoria: editandoLancamento.categoria,
+        descricao: editandoLancamento.descricao,
+        valor: valorFinal,
+        data: editandoLancamento.data,
+        socio_id: editandoLancamento.tipo === 'aporte' ? parseInt(editandoLancamento.socio_id) : null
+      })
+      .eq('id', editandoLancamento.id)
+    
+    if (error) {
+      alert('Erro ao salvar: ' + error.message)
+    } else {
+      setShowEditLancamento(false)
+      setEditandoLancamento(null)
+      await loadAllData()
+    }
+  }
+
+  // Função para excluir lançamento
+  const handleDeleteLancamento = async (id) => {
+    if (!confirm('Tem certeza que deseja excluir este lançamento?')) {
+      return
+    }
+    
+    const { error } = await supabase
+      .from('lancamentos')
+      .delete()
+      .eq('id', id)
+    
+    if (error) {
+      alert('Erro ao excluir: ' + error.message)
+    } else {
       await loadAllData()
     }
   }
@@ -551,8 +617,26 @@ export default function Home() {
                       <div className="text-sm text-gray-400">{item.categoria} • {formatDate(item.data)}</div>
                     </div>
                   </div>
-                  <div className={`font-semibold ${item.valor >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {item.valor >= 0 ? '+' : ''}{formatMoney(item.valor)}
+                  <div className="flex items-center gap-4">
+                    <div className={`font-semibold ${item.valor >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {item.valor >= 0 ? '+' : ''}{formatMoney(item.valor)}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleEditLancamento(item)}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Editar"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => handleDeleteLancamento(item.id)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Excluir"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1043,6 +1127,117 @@ export default function Home() {
                 className="flex-1 py-3 bg-green-900 text-white rounded-xl font-semibold hover:bg-green-800 transition-colors"
               >
                 Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Modal Editar Lançamento */}
+      {showEditLancamento && editandoLancamento && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
+            <h3 className="text-xl font-bold mb-6">✏️ Editar Lançamento</h3>
+            
+            <div className="mb-5">
+              <label className="block mb-2 font-medium text-sm">Tipo</label>
+              <div className="flex flex-wrap gap-2">
+                {['saida', 'aporte', 'infraestrutura', 'entrada'].map(tipo => (
+                  <button 
+                    key={tipo}
+                    onClick={() => setEditandoLancamento({...editandoLancamento, tipo})}
+                    className={`px-4 py-2 rounded-lg border-2 transition-colors ${
+                      editandoLancamento.tipo === tipo 
+                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    {tipo === 'saida' ? 'Saída' : tipo === 'aporte' ? 'Aporte' : tipo === 'infraestrutura' ? 'Infraestrutura' : 'Entrada'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <div className="mb-5">
+              <label className="block mb-2 font-medium text-sm">Categoria</label>
+              <select 
+                value={editandoLancamento.categoria}
+                onChange={(e) => setEditandoLancamento({...editandoLancamento, categoria: e.target.value})}
+                className="w-full p-3 border-2 border-gray-200 rounded-xl"
+              >
+                <option value="">Selecione...</option>
+                <option value="compra_gado">Compra Gado</option>
+                <option value="venda_gado">Venda Gado</option>
+                <option value="racao">Ração</option>
+                <option value="medicamento">Medicamento</option>
+                <option value="frete">Frete</option>
+                <option value="aporte">Aporte</option>
+                <option value="infraestrutura">Infraestrutura</option>
+                <option value="outros">Outros</option>
+              </select>
+            </div>
+            
+            {editandoLancamento.tipo === 'aporte' && (
+              <div className="mb-5">
+                <label className="block mb-2 font-medium text-sm">Sócio</label>
+                <select 
+                  value={editandoLancamento.socio_id || ''}
+                  onChange={(e) => setEditandoLancamento({...editandoLancamento, socio_id: e.target.value})}
+                  className="w-full p-3 border-2 border-gray-200 rounded-xl"
+                >
+                  <option value="">Selecione o sócio...</option>
+                  {socios.map(s => (
+                    <option key={s.id} value={s.id}>{s.nome}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            
+            <div className="mb-5">
+              <label className="block mb-2 font-medium text-sm">Descrição</label>
+              <input 
+                type="text"
+                value={editandoLancamento.descricao || ''}
+                onChange={(e) => setEditandoLancamento({...editandoLancamento, descricao: e.target.value})}
+                placeholder="Ex: 5 sacos de ração"
+                className="w-full p-3 border-2 border-gray-200 rounded-xl"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4 mb-5">
+              <div>
+                <label className="block mb-2 font-medium text-sm">Valor (R$)</label>
+                <input 
+                  type="number"
+                  value={editandoLancamento.valor}
+                  onChange={(e) => setEditandoLancamento({...editandoLancamento, valor: e.target.value})}
+                  placeholder="0,00"
+                  className="w-full p-3 border-2 border-gray-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block mb-2 font-medium text-sm">Data</label>
+                <input 
+                  type="date"
+                  value={editandoLancamento.data}
+                  onChange={(e) => setEditandoLancamento({...editandoLancamento, data: e.target.value})}
+                  className="w-full p-3 border-2 border-gray-200 rounded-xl"
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { setShowEditLancamento(false); setEditandoLancamento(null); }}
+                className="flex-1 py-3 border-2 border-gray-200 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleSaveEditLancamento}
+                className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+              >
+                Salvar Alterações
               </button>
             </div>
           </div>

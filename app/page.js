@@ -78,13 +78,18 @@ export default function Home() {
 
   const handleLogin = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('config')
-      .select('senha_acesso')
+    
+    // Verificar senha na tabela de sócios
+    const { data: socioData, error } = await supabase
+      .from('socios')
+      .select('id, nome, senha')
+      .eq('senha', password)
       .single()
     
-    if (data && data.senha_acesso === password) {
+    if (socioData) {
       localStorage.setItem('agroprimos_auth', 'true')
+      localStorage.setItem('agroprimos_socio_id', socioData.id.toString())
+      localStorage.setItem('agroprimos_socio_nome', socioData.nome)
       setIsAuthenticated(true)
       await loadAllData()
     } else {
@@ -95,6 +100,8 @@ export default function Home() {
 
   const handleLogout = () => {
     localStorage.removeItem('agroprimos_auth')
+    localStorage.removeItem('agroprimos_socio_id')
+    localStorage.removeItem('agroprimos_socio_nome')
     setIsAuthenticated(false)
   }
 
@@ -884,12 +891,17 @@ export default function Home() {
           <span className="text-3xl">🐄</span>
           <h1 className="text-xl font-bold text-green-900">AgroPrimos</h1>
         </div>
-        <button
-          onClick={handleLogout}
-          className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-        >
-          Sair
-        </button>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-500">
+            Olá, <strong className="text-green-900">{typeof window !== 'undefined' ? localStorage.getItem('agroprimos_socio_nome') || 'Visitante' : 'Visitante'}</strong>
+          </span>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            Sair
+          </button>
+        </div>
       </header>
       
       <div className="flex">

@@ -41,6 +41,8 @@ export default function Home() {
   const [showEditPesagem, setShowEditPesagem] = useState(false)
   const [editandoVenda, setEditandoVenda] = useState(null)
   const [showEditVenda, setShowEditVenda] = useState(false)
+  const [showEditAnimal, setShowEditAnimal] = useState(false)
+  const [editandoAnimal, setEditandoAnimal] = useState(null)
   
   const [novoAnimal, setNovoAnimal] = useState({
     nome: '', apelido: '', brinco: '', raca: 'Nelore', sexo: 'Fêmea',
@@ -53,6 +55,7 @@ export default function Home() {
   })
   
   const [observacoesFechamento, setObservacoesFechamento] = useState('')
+  const [dataFechamento, setDataFechamento] = useState(new Date().toISOString().split('T')[0])
   
   const [novoLoteData, setNovoLoteData] = useState({
     nome: '', data_inicio: new Date().toISOString().split('T')[0]
@@ -265,6 +268,53 @@ export default function Home() {
     await loadAllData(); setShowAnimalModal(false)
   }
 
+  const handleEditAnimal = (a) => {
+    setEditandoAnimal({
+      id: a.id, nome: a.nome, apelido: a.apelido || '', brinco: a.brinco || '',
+      raca: a.raca, sexo: a.sexo, idade: a.idade || '', cor: a.cor || '',
+      peso_compra: a.peso_compra?.toString() || '', valor_compra: a.valor_compra?.toString() || '',
+      data_compra: a.data_compra || '', observacoes: a.observacoes || ''
+    })
+    setShowEditAnimal(true)
+  }
+
+  const handleSaveEditAnimal = async () => {
+    if (!editandoAnimal.nome || !editandoAnimal.peso_compra || !editandoAnimal.valor_compra) {
+      alert('Preencha os campos obrigatórios!')
+      return
+    }
+    const pesoCompra = parseFloat(editandoAnimal.peso_compra)
+    const arrobaCompra = (pesoCompra / 15).toFixed(2)
+    await supabase.from('animais').update({
+      nome: editandoAnimal.nome, apelido: editandoAnimal.apelido, brinco: editandoAnimal.brinco,
+      raca: editandoAnimal.raca, sexo: editandoAnimal.sexo, idade: editandoAnimal.idade, cor: editandoAnimal.cor,
+      peso_compra: pesoCompra, arroba_compra: arrobaCompra, valor_compra: parseFloat(editandoAnimal.valor_compra),
+      data_compra: editandoAnimal.data_compra, observacoes: editandoAnimal.observacoes
+    }).eq('id', editandoAnimal.id)
+    // Atualiza o lançamento de compra correspondente
+    await supabase.from('lancamentos').update({
+      descricao: editandoAnimal.nome, valor: -parseFloat(editandoAnimal.valor_compra), data: editandoAnimal.data_compra
+    }).eq('animal_id', editandoAnimal.id).eq('categoria', 'compra_gado')
+    setShowEditAnimal(false)
+    setEditandoAnimal(null)
+    await loadAllData()
+    const { data: upd } = await supabase.from('animais').select('*').eq('id', editandoAnimal.id).single()
+    setSelectedAnimal(upd)
+  }
+
+  const handleDeleteAnimal = async (animalId) => {
+    if (!confirm('Excluir este animal? Isso também removerá todas as pesagens e lançamentos relacionados.')) return
+    // Remove pesagens
+    await supabase.from('pesagens').delete().eq('animal_id', animalId)
+    // Remove lançamentos (compra e venda)
+    await supabase.from('lancamentos').delete().eq('animal_id', animalId)
+    // Remove animal
+    await supabase.from('animais').delete().eq('id', animalId)
+    setShowAnimalModal(false)
+    setSelectedAnimal(null)
+    await loadAllData()
+  }
+
   const handleEditVenda = (a) => { setEditandoVenda({ id: a.id, peso_venda: a.peso_venda?.toString() || '', valor_venda: a.valor_venda?.toString() || '', data_venda: a.data_venda || '' }); setShowEditVenda(true) }
 
   const handleSaveEditVenda = async () => {
@@ -296,11 +346,11 @@ export default function Home() {
     const totalSaidas = lancamentos.filter(l => l.tipo === 'saida').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
     const totalInfra = lancamentos.filter(l => l.tipo === 'infraestrutura').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
     await supabase.from('lotes').update({
-      status: 'fechado', data_fim: new Date().toISOString().split('T')[0], observacoes: observacoesFechamento,
+      status: 'fechado', data_fim: dataFechamento, observacoes: observacoesFechamento,
       resultado_bruto: totalEntradas - totalSaidas, resultado_liquido: totalEntradas - totalSaidas - totalInfra,
       total_aportes: totalAportes, total_vendas: totalEntradas, total_custos: totalSaidas, total_infraestrutura: totalInfra
     }).eq('id', loteAtual.id)
-    setShowFecharLote(false); setObservacoesFechamento(''); alert('Lote fechado!'); await loadAllData()
+    setShowFecharLote(false); setObservacoesFechamento(''); setDataFechamento(new Date().toISOString().split('T')[0]); alert('Lote fechado!'); await loadAllData()
   }
 
   const loadLoteData = async (loteId) => {
@@ -811,7 +861,13 @@ export default function Home() {
               </div>
               <div className="grid md:grid-cols-2 gap-4 md:gap-6">
                 <div>
-                  <h3 className="font-semibold text-green-900 mb-3 md:mb-4 text-sm md:text-base">📋 Informações</h3>
+                  <div className="flex justify-between items-center mb-3 md:mb-4">
+                    <h3 className="font-semibold text-green-900 text-sm md:text-base">📋 Informações</h3>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleEditAnimal(selectedAnimal)} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium active:bg-blue-200">✏️ Editar</button>
+                      <button onClick={() => handleDeleteAnimal(selectedAnimal.id)} className="px-3 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-medium active:bg-red-200">🗑️ Excluir</button>
+                    </div>
+                  </div>
                   <div className="bg-gray-50 rounded-xl p-4 md:p-5 space-y-2 md:space-y-3 text-xs md:text-sm">
                     <div className="flex justify-between"><span className="text-gray-500">Brinco</span><span className="font-medium">{selectedAnimal.brinco || '-'}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Raça</span><span className="font-medium">{selectedAnimal.raca}</span></div>
@@ -902,6 +958,35 @@ export default function Home() {
         </div>
       )}
 
+      {/* Modal: Editar Animal */}
+      {showEditAnimal && editandoAnimal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-xl max-h-[90vh] overflow-auto">
+            <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white"><h2 className="text-lg md:text-xl font-bold">✏️ Editar Animal</h2><button onClick={() => { setShowEditAnimal(false); setEditandoAnimal(null) }} className="w-9 h-9 bg-gray-100 rounded-full text-lg active:bg-gray-200">✕</button></div>
+            <div className="p-4 md:p-6">
+              <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
+                <div><label className="block mb-1 text-xs md:text-sm font-medium">Nome *</label><input type="text" value={editandoAnimal.nome} onChange={(e) => setEditandoAnimal({...editandoAnimal, nome: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base" /></div>
+                <div><label className="block mb-1 text-xs md:text-sm font-medium">Apelido</label><input type="text" value={editandoAnimal.apelido} onChange={(e) => setEditandoAnimal({...editandoAnimal, apelido: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base" /></div>
+                <div><label className="block mb-1 text-xs md:text-sm font-medium">Brinco</label><input type="text" value={editandoAnimal.brinco} onChange={(e) => setEditandoAnimal({...editandoAnimal, brinco: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base" /></div>
+                <div><label className="block mb-1 text-xs md:text-sm font-medium">Raça</label><select value={editandoAnimal.raca} onChange={(e) => setEditandoAnimal({...editandoAnimal, raca: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base"><option>Nelore</option><option>Angus</option><option>Brahman</option><option>Gir</option><option>Mestiço</option></select></div>
+                <div><label className="block mb-1 text-xs md:text-sm font-medium">Sexo</label><select value={editandoAnimal.sexo} onChange={(e) => setEditandoAnimal({...editandoAnimal, sexo: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base"><option>Fêmea</option><option>Macho</option><option>Macho Castrado</option></select></div>
+                <div><label className="block mb-1 text-xs md:text-sm font-medium">Data Compra *</label><input type="date" value={editandoAnimal.data_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, data_compra: e.target.value})} className="w-full p-3 border-2 border-gray-200 rounded-lg text-base" /></div>
+              </div>
+              <div className="bg-green-50 rounded-xl p-4 md:p-5 mb-4">
+                <h4 className="font-semibold text-green-900 text-sm mb-3 md:mb-4">⚖️ Peso e Valor de Compra</h4>
+                <div className="grid grid-cols-3 gap-3 md:gap-4">
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Peso (kg) *</label><input type="number" inputMode="decimal" value={editandoAnimal.peso_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, peso_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Arrobas</label><input type="text" value={editandoAnimal.peso_compra ? (parseFloat(editandoAnimal.peso_compra) / 15).toFixed(2) + ' @' : ''} disabled className="w-full p-3 border-2 border-green-200 rounded-lg bg-gray-100 text-base" /></div>
+                  <div><label className="block mb-1 text-xs md:text-sm font-medium">Valor (R$) *</label><input type="number" inputMode="decimal" value={editandoAnimal.valor_compra} onChange={(e) => setEditandoAnimal({...editandoAnimal, valor_compra: e.target.value})} className="w-full p-3 border-2 border-green-200 rounded-lg bg-white text-base" /></div>
+                </div>
+              </div>
+              <div className="mb-4"><label className="block mb-1 text-xs md:text-sm font-medium">Observações</label><textarea value={editandoAnimal.observacoes} onChange={(e) => setEditandoAnimal({...editandoAnimal, observacoes: e.target.value})} rows={2} className="w-full p-3 border-2 border-gray-200 rounded-lg resize-none text-base" /></div>
+              <div className="flex gap-3"><button onClick={() => { setShowEditAnimal(false); setEditandoAnimal(null) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveEditAnimal} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Fechar Lote */}
       {showFecharLote && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -910,15 +995,16 @@ export default function Home() {
             <div className="bg-green-50 rounded-xl p-4 md:p-5 mb-6">
               <h4 className="font-semibold text-green-900 mb-3 md:mb-4 text-sm md:text-base">Resumo: {loteAtual?.nome}</h4>
               <div className="grid grid-cols-2 gap-3 md:gap-4 text-xs md:text-sm">
-                <div><span className="text-gray-500">Período:</span> <span className="font-medium">{formatDate(loteAtual?.data_inicio)} - Hoje</span></div>
+                <div><span className="text-gray-500">Período:</span> <span className="font-medium">{formatDate(loteAtual?.data_inicio)} - {formatDate(dataFechamento)}</span></div>
                 <div><span className="text-gray-500">Duração:</span> <span className="font-medium">{calcularDiasLote(loteAtual?.data_inicio)} dias</span></div>
                 <div><span className="text-gray-500">Animais:</span> <span className="font-medium">{animais.length}</span></div>
                 <div><span className="text-gray-500">Aportes:</span> <span className="font-medium">{formatMoney(indicadores.totalAportes)}</span></div>
               </div>
             </div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm md:text-base">📅 Data de Fechamento</label><input type="date" value={dataFechamento} onChange={(e) => setDataFechamento(e.target.value)} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /><p className="text-xs text-gray-500 mt-2">Informe a data real em que o lote foi encerrado.</p></div>
             <div className="mb-6"><label className="block mb-2 font-medium text-sm md:text-base">📝 Observações do Lote</label><textarea value={observacoesFechamento} onChange={(e) => setObservacoesFechamento(e.target.value)} placeholder="Registre acontecimentos importantes..." rows={4} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl resize-none text-base" /><p className="text-xs text-gray-500 mt-2">Essas observações ficarão no histórico.</p></div>
             <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 md:p-4 mb-6"><p className="text-xs md:text-sm text-yellow-800"><strong>⚠️</strong> Ao fechar, você confirma que todos os lançamentos estão corretos.</p></div>
-            <div className="flex gap-3"><button onClick={() => { setShowFecharLote(false); setObservacoesFechamento('') }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleFecharLote} className="flex-1 py-3 md:py-4 bg-orange-500 text-white rounded-xl font-semibold active:bg-orange-600">Confirmar</button></div>
+            <div className="flex gap-3"><button onClick={() => { setShowFecharLote(false); setObservacoesFechamento(''); setDataFechamento(new Date().toISOString().split('T')[0]) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleFecharLote} className="flex-1 py-3 md:py-4 bg-orange-500 text-white rounded-xl font-semibold active:bg-orange-600">Confirmar</button></div>
           </div>
         </div>
       )}

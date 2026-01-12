@@ -145,23 +145,27 @@ export default function Home() {
 
   const handleSaveLancamento = async () => {
     if (!novoLancamento.categoria || !novoLancamento.valor || !novoLancamento.data) { alert('Preencha todos os campos!'); return }
-    if (novoLancamento.tipo === 'aporte' && !novoLancamento.socio_id) { alert('Selecione o sócio!'); return }
+    if ((novoLancamento.tipo === 'aporte' || novoLancamento.tipo === 'dividendo') && !novoLancamento.socio_id) { alert('Selecione o sócio!'); return }
     let valorFinal = parseFloat(novoLancamento.valor)
-    if (novoLancamento.tipo === 'saida' || novoLancamento.tipo === 'infraestrutura') valorFinal = -Math.abs(valorFinal)
+    if (novoLancamento.tipo === 'saida' || novoLancamento.tipo === 'infraestrutura' || novoLancamento.tipo === 'dividendo') valorFinal = -Math.abs(valorFinal)
     
-    // Montar descrição com nome do sócio para aportes
+    // Montar descrição com nome do sócio para aportes e dividendos
     let descricaoFinal = novoLancamento.descricao
     if (novoLancamento.tipo === 'aporte') {
       const socio = socios.find(s => s.id === parseInt(novoLancamento.socio_id))
       const tipoAporte = novoLancamento.subcategoria === 'aporte_inicial' ? 'Aporte Inicial' : 'Aporte'
       const base = socio ? `${tipoAporte} - ${socio.nome}` : tipoAporte
       descricaoFinal = novoLancamento.descricao ? `${base} - ${novoLancamento.descricao}` : base
+    } else if (novoLancamento.tipo === 'dividendo') {
+      const socio = socios.find(s => s.id === parseInt(novoLancamento.socio_id))
+      const base = socio ? `Dividendo - ${socio.nome}` : 'Dividendo'
+      descricaoFinal = novoLancamento.descricao ? `${base} - ${novoLancamento.descricao}` : base
     }
     
     await supabase.from('lancamentos').insert({
       lote_id: loteAtual.id, tipo: novoLancamento.tipo, categoria: novoLancamento.categoria,
       descricao: descricaoFinal, valor: valorFinal, data: novoLancamento.data,
-      socio_id: novoLancamento.tipo === 'aporte' ? parseInt(novoLancamento.socio_id) : null, rateio_lote: novoLancamento.rateio_lote
+      socio_id: (novoLancamento.tipo === 'aporte' || novoLancamento.tipo === 'dividendo') ? parseInt(novoLancamento.socio_id) : null, rateio_lote: novoLancamento.rateio_lote
     })
     setShowNewLancamento(false)
     setNovoLancamento({ tipo: 'saida', categoria: '', subcategoria: '', descricao: '', valor: '', data: new Date().toISOString().split('T')[0], socio_id: '', rateio_lote: true })
@@ -182,12 +186,12 @@ export default function Home() {
   const handleSaveEditLancamento = async () => {
     if (!editandoLancamento.categoria || !editandoLancamento.valor) { alert('Preencha os campos!'); return }
     let valorFinal = parseFloat(editandoLancamento.valor)
-    if (editandoLancamento.tipo === 'saida' || editandoLancamento.tipo === 'infraestrutura') valorFinal = -Math.abs(valorFinal)
+    if (editandoLancamento.tipo === 'saida' || editandoLancamento.tipo === 'infraestrutura' || editandoLancamento.tipo === 'dividendo') valorFinal = -Math.abs(valorFinal)
     else valorFinal = Math.abs(valorFinal)
     await supabase.from('lancamentos').update({
       tipo: editandoLancamento.tipo, categoria: editandoLancamento.categoria, descricao: editandoLancamento.descricao,
       valor: valorFinal, data: editandoLancamento.data,
-      socio_id: editandoLancamento.tipo === 'aporte' ? parseInt(editandoLancamento.socio_id) : null
+      socio_id: (editandoLancamento.tipo === 'aporte' || editandoLancamento.tipo === 'dividendo') ? parseInt(editandoLancamento.socio_id) : null
     }).eq('id', editandoLancamento.id)
     setShowEditLancamento(false); setEditandoLancamento(null); await loadAllData()
   }
@@ -402,22 +406,37 @@ export default function Home() {
     const frete = lancamentos.filter(l => l.categoria === 'frete').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
     const outrosCustos = lancamentos.filter(l => l.tipo === 'saida' && !['compra_gado', 'racao', 'medicamento', 'frete'].includes(l.categoria)).reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
     const infraestrutura = lancamentos.filter(l => l.tipo === 'infraestrutura').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+    const dividendos = lancamentos.filter(l => l.tipo === 'dividendo').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
     const totalReceitas = vendasGado + outrasEntradas, totalCustos = compraGado + racao + medicamentos + frete + outrosCustos, totalDespesas = infraestrutura
     const resultadoBruto = totalReceitas - totalCustos, resultadoLiquido = resultadoBruto - totalDespesas
+    const resultadoFinal = resultadoLiquido - dividendos
     const diasLote = calcularDiasLote(loteAtual?.data_inicio), mesesLote = diasLote / 30
-    const rendimentoSoCustos = mesesLote > 0 && aportes > 0 ? ((resultadoBruto / aportes) / mesesLote) * 100 : 0
-    const rendimentoComDespesas = mesesLote > 0 && aportes > 0 ? ((resultadoLiquido / aportes) / mesesLote) * 100 : 0
-    return { aportes, vendasGado, outrasEntradas, totalReceitas, compraGado, racao, medicamentos, frete, outrosCustos, totalCustos, infraestrutura, totalDespesas, resultadoBruto, resultadoLiquido, rendimentoSoCustos, rendimentoComDespesas }
+    
+    // Juros compostos: (((Resultado + Aportes) / Aportes) ^ (1 / Meses)) - 1
+    const montanteBruto = resultadoBruto + aportes
+    const montanteLiquido = resultadoLiquido + aportes
+    const rendimentoSoCustos = mesesLote > 0 && aportes > 0 ? (Math.pow(montanteBruto / aportes, 1 / mesesLote) - 1) * 100 : 0
+    const rendimentoComDespesas = mesesLote > 0 && aportes > 0 ? (Math.pow(montanteLiquido / aportes, 1 / mesesLote) - 1) * 100 : 0
+    
+    return { aportes, vendasGado, outrasEntradas, totalReceitas, compraGado, racao, medicamentos, frete, outrosCustos, totalCustos, infraestrutura, totalDespesas, resultadoBruto, resultadoLiquido, dividendos, resultadoFinal, rendimentoSoCustos, rendimentoComDespesas }
   }
 
-  // Calcular rendimento de um lote fechado
+  // Calcular rendimento de um lote fechado (JUROS COMPOSTOS)
+  // Fórmula: (((Resultado + Aportes) / Aportes) ^ (1 / Meses)) - 1
   const calcularRendimentoLote = (lote) => {
     if (!lote || !lote.total_aportes || lote.total_aportes <= 0) return { soCustos: 0, comDespesas: 0 }
     const dias = calcularDiasLote(lote.data_inicio, lote.data_fim)
     const meses = dias / 30
     if (meses <= 0) return { soCustos: 0, comDespesas: 0 }
-    const soCustos = ((lote.resultado_bruto / lote.total_aportes) / meses) * 100
-    const comDespesas = ((lote.resultado_liquido / lote.total_aportes) / meses) * 100
+    
+    // Montante = Resultado + Aportes (o que sobrou no final)
+    const montanteBruto = lote.resultado_bruto + lote.total_aportes
+    const montanteLiquido = lote.resultado_liquido + lote.total_aportes
+    
+    // Taxa mensal = (Montante / Principal) ^ (1/meses) - 1
+    const soCustos = (Math.pow(montanteBruto / lote.total_aportes, 1 / meses) - 1) * 100
+    const comDespesas = (Math.pow(montanteLiquido / lote.total_aportes, 1 / meses) - 1) * 100
+    
     return { soCustos, comDespesas }
   }
 
@@ -536,8 +555,8 @@ export default function Home() {
               {lancamentosFiltrados.map((item, idx) => (
                 <div key={item.id} className={`p-3 md:p-4 flex justify-between items-center gap-3 ${idx < lancamentosFiltrados.length - 1 ? 'border-b border-gray-100' : ''}`}>
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-base md:text-lg flex-shrink-0 ${item.tipo === 'entrada' || item.tipo === 'aporte' ? 'bg-green-100' : item.tipo === 'infraestrutura' ? 'bg-orange-100' : 'bg-red-100'}`}>
-                      {item.tipo === 'entrada' || item.tipo === 'aporte' ? '📥' : item.tipo === 'infraestrutura' ? '🔧' : '📤'}
+                    <div className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-base md:text-lg flex-shrink-0 ${item.tipo === 'entrada' || item.tipo === 'aporte' ? 'bg-green-100' : item.tipo === 'infraestrutura' ? 'bg-orange-100' : item.tipo === 'dividendo' ? 'bg-purple-100' : 'bg-red-100'}`}>
+                      {item.tipo === 'entrada' || item.tipo === 'aporte' ? '📥' : item.tipo === 'infraestrutura' ? '🔧' : item.tipo === 'dividendo' ? '💸' : '📤'}
                     </div>
                     <div className="min-w-0 flex-1"><div className="font-medium text-sm md:text-base truncate">{item.descricao || item.categoria}</div><div className="text-xs md:text-sm text-gray-400 truncate">{item.categoria} • {formatDate(item.data)}</div></div>
                   </div>
@@ -668,6 +687,15 @@ export default function Home() {
                     </div>
                   </div>
                   <div className={`rounded-lg p-3 md:p-4 ${dre.resultadoLiquido >= 0 ? 'bg-green-100' : 'bg-red-100'}`}><div className="flex justify-between font-bold text-base md:text-xl"><span>= RESULTADO LÍQUIDO</span><span className={dre.resultadoLiquido >= 0 ? 'text-green-700' : 'text-red-700'}>{formatMoney(dre.resultadoLiquido)}</span></div></div>
+                  {dre.dividendos > 0 && (
+                    <>
+                      <div className="bg-purple-50 rounded-lg p-3 md:p-4">
+                        <div className="font-semibold text-purple-800 mb-2 md:mb-3 text-xs md:text-sm">(-) DIVIDENDOS DISTRIBUÍDOS</div>
+                        <div className="flex justify-between text-xs md:text-sm"><span className="text-gray-600 pl-2 md:pl-4">Divisão de Lucro</span><span className="font-medium text-purple-600">-{formatMoney(dre.dividendos)}</span></div>
+                      </div>
+                      <div className={`rounded-lg p-3 md:p-4 ${dre.resultadoFinal >= 0 ? 'bg-blue-100' : 'bg-red-100'}`}><div className="flex justify-between font-bold text-base md:text-xl"><span>= SALDO FINAL</span><span className={dre.resultadoFinal >= 0 ? 'text-blue-700' : 'text-red-700'}>{formatMoney(dre.resultadoFinal)}</span></div></div>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="bg-white rounded-2xl p-4 md:p-6 shadow-lg">
@@ -802,7 +830,7 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl md:rounded-3xl p-6 md:p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
             <h3 className="text-xl font-bold mb-6">💳 Novo Lançamento</h3>
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo</label><div className="grid grid-cols-2 gap-2">{['saida', 'aporte', 'infraestrutura', 'entrada'].map(t => (<button key={t} onClick={() => setNovoLancamento({...novoLancamento, tipo: t, categoria: t === 'aporte' ? 'aporte' : t === 'infraestrutura' ? 'infraestrutura' : '', subcategoria: ''})} className={`px-3 py-3 rounded-xl border-2 text-sm font-medium active:scale-[0.98] ${novoLancamento.tipo === t ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200'}`}>{t === 'saida' ? '📤 Saída' : t === 'aporte' ? '📥 Aporte' : t === 'infraestrutura' ? '🔧 Infra' : '💰 Entrada'}</button>))}</div></div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo</label><div className="grid grid-cols-3 gap-2">{['saida', 'aporte', 'entrada', 'infraestrutura', 'dividendo'].map(t => (<button key={t} onClick={() => setNovoLancamento({...novoLancamento, tipo: t, categoria: t === 'aporte' ? 'aporte' : t === 'infraestrutura' ? 'infraestrutura' : t === 'dividendo' ? 'dividendo' : '', subcategoria: ''})} className={`px-3 py-3 rounded-xl border-2 text-sm font-medium active:scale-[0.98] ${novoLancamento.tipo === t ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200'}`}>{t === 'saida' ? '📤 Saída' : t === 'aporte' ? '📥 Aporte' : t === 'infraestrutura' ? '🔧 Infra' : t === 'dividendo' ? '💸 Dividendo' : '💰 Entrada'}</button>))}</div></div>
             {novoLancamento.tipo === 'aporte' && (
               <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo de Aporte</label><div className="flex gap-2">
                 <button onClick={() => setNovoLancamento({...novoLancamento, subcategoria: 'aporte_inicial'})} className={`flex-1 px-3 py-2 rounded-lg border-2 text-sm ${novoLancamento.subcategoria === 'aporte_inicial' ? 'border-green-600 bg-green-50' : 'border-gray-200'}`}>Aporte Inicial</button>
@@ -815,7 +843,7 @@ export default function Home() {
             {novoLancamento.tipo === 'entrada' && (
               <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={novoLancamento.categoria} onChange={(e) => setNovoLancamento({...novoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option><option value="venda_gado">Venda Gado</option><option value="outros">Outros</option></select></div>
             )}
-            {novoLancamento.tipo === 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio *</label><select value={novoLancamento.socio_id} onChange={(e) => setNovoLancamento({...novoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione o sócio...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
+            {(novoLancamento.tipo === 'aporte' || novoLancamento.tipo === 'dividendo') && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio *</label><select value={novoLancamento.socio_id} onChange={(e) => setNovoLancamento({...novoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione o sócio...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
             <div className="mb-5"><label className="block mb-2 font-medium text-sm">Descrição {novoLancamento.tipo !== 'aporte' && '(opcional)'}</label><input type="text" value={novoLancamento.descricao} onChange={(e) => setNovoLancamento({...novoLancamento, descricao: e.target.value})} placeholder={novoLancamento.tipo === 'aporte' ? "Ex: referente a compra do boi X" : "Ex: 5 sacos de ração"} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
             <div className="grid grid-cols-2 gap-3 md:gap-4 mb-5"><div><label className="block mb-2 font-medium text-sm">Valor (R$)</label><input type="number" inputMode="decimal" value={novoLancamento.valor} onChange={(e) => setNovoLancamento({...novoLancamento, valor: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div><div><label className="block mb-2 font-medium text-sm">Data</label><input type="date" value={novoLancamento.data} onChange={(e) => setNovoLancamento({...novoLancamento, data: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div></div>
             <div className="flex gap-3"><button onClick={() => setShowNewLancamento(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveLancamento} className="flex-1 py-3 md:py-4 bg-green-900 text-white rounded-xl font-semibold active:bg-green-800">Salvar</button></div>
@@ -828,9 +856,9 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl md:rounded-3xl p-6 md:p-8 w-full max-w-lg max-h-[90vh] overflow-auto">
             <h3 className="text-xl font-bold mb-6">✏️ Editar Lançamento</h3>
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo</label><div className="grid grid-cols-2 gap-2">{['saida', 'aporte', 'infraestrutura', 'entrada'].map(t => (<button key={t} onClick={() => setEditandoLancamento({...editandoLancamento, tipo: t})} className={`px-3 py-3 rounded-xl border-2 text-sm font-medium active:scale-[0.98] ${editandoLancamento.tipo === t ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200'}`}>{t === 'saida' ? '📤 Saída' : t === 'aporte' ? '📥 Aporte' : t === 'infraestrutura' ? '🔧 Infra' : '💰 Entrada'}</button>))}</div></div>
-            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={editandoLancamento.categoria} onChange={(e) => setEditandoLancamento({...editandoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option><option value="compra_gado">Compra Gado</option><option value="venda_gado">Venda Gado</option><option value="racao">Ração</option><option value="medicamento">Medicamento</option><option value="frete">Frete</option><option value="aporte">Aporte</option><option value="infraestrutura">Infraestrutura</option><option value="outros">Outros</option></select></div>
-            {editandoLancamento.tipo === 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio</label><select value={editandoLancamento.socio_id || ''} onChange={(e) => setEditandoLancamento({...editandoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Tipo</label><div className="grid grid-cols-3 gap-2">{['saida', 'aporte', 'entrada', 'infraestrutura', 'dividendo'].map(t => (<button key={t} onClick={() => setEditandoLancamento({...editandoLancamento, tipo: t})} className={`px-3 py-3 rounded-xl border-2 text-sm font-medium active:scale-[0.98] ${editandoLancamento.tipo === t ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200'}`}>{t === 'saida' ? '📤 Saída' : t === 'aporte' ? '📥 Aporte' : t === 'infraestrutura' ? '🔧 Infra' : t === 'dividendo' ? '💸 Dividendo' : '💰 Entrada'}</button>))}</div></div>
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={editandoLancamento.categoria} onChange={(e) => setEditandoLancamento({...editandoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option><option value="compra_gado">Compra Gado</option><option value="venda_gado">Venda Gado</option><option value="racao">Ração</option><option value="medicamento">Medicamento</option><option value="frete">Frete</option><option value="aporte">Aporte</option><option value="infraestrutura">Infraestrutura</option><option value="dividendo">Dividendo</option><option value="outros">Outros</option></select></div>
+            {(editandoLancamento.tipo === 'aporte' || editandoLancamento.tipo === 'dividendo') && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio</label><select value={editandoLancamento.socio_id || ''} onChange={(e) => setEditandoLancamento({...editandoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
             <div className="mb-5"><label className="block mb-2 font-medium text-sm">Descrição</label><input type="text" value={editandoLancamento.descricao || ''} onChange={(e) => setEditandoLancamento({...editandoLancamento, descricao: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
             <div className="grid grid-cols-2 gap-3 md:gap-4 mb-5"><div><label className="block mb-2 font-medium text-sm">Valor (R$)</label><input type="number" inputMode="decimal" value={editandoLancamento.valor} onChange={(e) => setEditandoLancamento({...editandoLancamento, valor: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div><div><label className="block mb-2 font-medium text-sm">Data</label><input type="date" value={editandoLancamento.data} onChange={(e) => setEditandoLancamento({...editandoLancamento, data: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div></div>
             <div className="flex gap-3"><button onClick={() => { setShowEditLancamento(false); setEditandoLancamento(null) }} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveEditLancamento} className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-xl font-semibold active:bg-blue-700">Salvar</button></div>

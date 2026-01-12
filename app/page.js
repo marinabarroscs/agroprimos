@@ -154,7 +154,8 @@ export default function Home() {
     if (novoLancamento.tipo === 'aporte') {
       const socio = socios.find(s => s.id === parseInt(novoLancamento.socio_id))
       const tipoAporte = novoLancamento.subcategoria === 'aporte_inicial' ? 'Aporte Inicial' : 'Aporte'
-      descricaoFinal = socio ? `${tipoAporte} - ${socio.nome}` : tipoAporte
+      const base = socio ? `${tipoAporte} - ${socio.nome}` : tipoAporte
+      descricaoFinal = novoLancamento.descricao ? `${base} - ${novoLancamento.descricao}` : base
     }
     
     await supabase.from('lancamentos').insert({
@@ -815,7 +816,7 @@ export default function Home() {
               <div className="mb-5"><label className="block mb-2 font-medium text-sm">Categoria</label><select value={novoLancamento.categoria} onChange={(e) => setNovoLancamento({...novoLancamento, categoria: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione...</option><option value="venda_gado">Venda Gado</option><option value="outros">Outros</option></select></div>
             )}
             {novoLancamento.tipo === 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Sócio *</label><select value={novoLancamento.socio_id} onChange={(e) => setNovoLancamento({...novoLancamento, socio_id: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base"><option value="">Selecione o sócio...</option>{socios.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></div>}
-            {novoLancamento.tipo !== 'aporte' && <div className="mb-5"><label className="block mb-2 font-medium text-sm">Descrição</label><input type="text" value={novoLancamento.descricao} onChange={(e) => setNovoLancamento({...novoLancamento, descricao: e.target.value})} placeholder="Ex: 5 sacos de ração" className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>}
+            <div className="mb-5"><label className="block mb-2 font-medium text-sm">Descrição {novoLancamento.tipo !== 'aporte' && '(opcional)'}</label><input type="text" value={novoLancamento.descricao} onChange={(e) => setNovoLancamento({...novoLancamento, descricao: e.target.value})} placeholder={novoLancamento.tipo === 'aporte' ? "Ex: referente a compra do boi X" : "Ex: 5 sacos de ração"} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div>
             <div className="grid grid-cols-2 gap-3 md:gap-4 mb-5"><div><label className="block mb-2 font-medium text-sm">Valor (R$)</label><input type="number" inputMode="decimal" value={novoLancamento.valor} onChange={(e) => setNovoLancamento({...novoLancamento, valor: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div><div><label className="block mb-2 font-medium text-sm">Data</label><input type="date" value={novoLancamento.data} onChange={(e) => setNovoLancamento({...novoLancamento, data: e.target.value})} className="w-full p-3 md:p-4 border-2 border-gray-200 rounded-xl text-base" /></div></div>
             <div className="flex gap-3"><button onClick={() => setShowNewLancamento(false)} className="flex-1 py-3 md:py-4 border-2 border-gray-200 rounded-xl font-semibold active:bg-gray-100">Cancelar</button><button onClick={handleSaveLancamento} className="flex-1 py-3 md:py-4 bg-green-900 text-white rounded-xl font-semibold active:bg-green-800">Salvar</button></div>
           </div>

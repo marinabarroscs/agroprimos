@@ -470,7 +470,7 @@ export default function Home() {
                         <span className="font-medium">{lote.nome}</span>
                         <span className={`text-sm font-semibold ${(lote.resultado_liquido || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatMoney(lote.resultado_liquido)}</span>
                       </div>
-                      <div className="text-xs text-gray-500">{formatDate(lote.data_inicio)} - {formatDate(lote.data_fim)} • {rend.comDespesas.toFixed(2)}% a.m.</div>
+                      <div className="text-xs text-gray-500">{formatDate(lote.data_inicio)} - {formatDate(lote.data_fim)} • {rend.soCustos.toFixed(2)}% a.m.</div>
                     </div>
                   )
                 })}
@@ -723,7 +723,7 @@ export default function Home() {
                         <div className="text-xs text-gray-500">{formatDate(lote.data_inicio)} - {formatDate(lote.data_fim)} • {calcularMesesLote(lote.data_inicio, lote.data_fim)} meses</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${rend.comDespesas >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{rend.comDespesas.toFixed(2)}% a.m.</span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${rend.soCustos >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{rend.soCustos.toFixed(2)}% a.m.</span>
                         <button onClick={async () => { const data = await loadLoteData(lote.id); setSelectedLote(data); setShowLoteDetalhes(true) }} className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-xs md:text-sm font-medium active:bg-green-200">📄 One-Page</button>
                       </div>
                     </div>

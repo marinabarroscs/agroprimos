@@ -110,12 +110,17 @@ export default function LotePublico() {
   const totalVendas = lancamentos.filter(l => l.tipo === 'entrada').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
   const totalCustos = lancamentos.filter(l => l.tipo === 'saida').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
   const totalDespesas = lancamentos.filter(l => l.tipo === 'infraestrutura').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+  const dividendos = lancamentos.filter(l => l.tipo === 'dividendo').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
   const resultadoBruto = totalVendas - totalCustos
   const resultadoLiquido = resultadoBruto - totalDespesas
+  const resultadoFinal = resultadoLiquido - dividendos
 
   // Rendimentos
-  const rendSoCustos = mesesNum > 0 && totalAportes > 0 ? ((resultadoBruto / totalAportes) / mesesNum) * 100 : 0
-  const rendComDespesas = mesesNum > 0 && totalAportes > 0 ? ((resultadoLiquido / totalAportes) / mesesNum) * 100 : 0
+  // Juros compostos: (((Resultado + Aportes) / Aportes) ^ (1 / Meses)) - 1
+  const montanteBruto = resultadoBruto + totalAportes
+  const montanteLiquido = resultadoLiquido + totalAportes
+  const rendSoCustos = mesesNum > 0 && totalAportes > 0 ? (Math.pow(montanteBruto / totalAportes, 1 / mesesNum) - 1) * 100 : 0
+  const rendComDespesas = mesesNum > 0 && totalAportes > 0 ? (Math.pow(montanteLiquido / totalAportes, 1 / mesesNum) - 1) * 100 : 0
 
   // Arrobas
   const totalArrobaCompra = animais.reduce((a, x) => a + parseFloat(x.arroba_compra || 0), 0)
@@ -293,6 +298,18 @@ export default function LotePublico() {
               <span className="font-bold">= Resultado Líquido</span>
               <span className={`font-bold text-lg ${resultadoLiquido >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatMoney(resultadoLiquido)}</span>
             </div>
+            {dividendos > 0 && (
+              <>
+                <div className="flex justify-between py-2 border-b border-gray-100">
+                  <span className="text-gray-600">(-) Dividendos Distribuídos</span>
+                  <span className="font-semibold text-purple-600">-{formatMoney(dividendos)}</span>
+                </div>
+                <div className={`flex justify-between py-3 ${resultadoFinal >= 0 ? 'bg-blue-50' : 'bg-red-50'} -mx-2 px-2 rounded-lg`}>
+                  <span className="font-bold">= Saldo Final</span>
+                  <span className={`font-bold text-lg ${resultadoFinal >= 0 ? 'text-blue-700' : 'text-red-700'}`}>{formatMoney(resultadoFinal)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

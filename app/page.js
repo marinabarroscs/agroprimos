@@ -14,6 +14,7 @@ export default function Home() {
   const [loteAtual, setLoteAtual] = useState(null)
   const [animais, setAnimais] = useState([])
   const [lancamentos, setLancamentos] = useState([])
+  const [todosLancamentos, setTodosLancamentos] = useState([])
   const [pesagens, setPesagens] = useState([])
   const [caixa, setCaixa] = useState(null)
   const [sociosLote, setSociosLote] = useState([])
@@ -71,9 +72,24 @@ export default function Home() {
 
   useEffect(() => { checkAuth() }, [])
 
+  const SESSION_DAYS = 7 // Sessão expira em 7 dias
+
   const checkAuth = async () => {
     const savedAuth = localStorage.getItem('agroprimos_auth')
-    if (savedAuth === 'true') {
+    const authExpiry = localStorage.getItem('agroprimos_auth_expiry')
+    
+    // Verificar se sessão expirou
+    if (savedAuth === 'true' && authExpiry) {
+      const expiryDate = new Date(authExpiry)
+      if (new Date() > expiryDate) {
+        // Sessão expirou - fazer logout
+        localStorage.removeItem('agroprimos_auth')
+        localStorage.removeItem('agroprimos_auth_expiry')
+        localStorage.removeItem('agroprimos_socio_id')
+        localStorage.removeItem('agroprimos_socio_nome')
+        setLoading(false)
+        return
+      }
       setIsAuthenticated(true)
       await loadAllData()
     }
@@ -84,7 +100,11 @@ export default function Home() {
     setLoading(true)
     const { data: socioData } = await supabase.from('socios').select('id, nome, senha').eq('senha', password).single()
     if (socioData) {
+      // Salvar auth com data de expiração
+      const expiryDate = new Date()
+      expiryDate.setDate(expiryDate.getDate() + SESSION_DAYS)
       localStorage.setItem('agroprimos_auth', 'true')
+      localStorage.setItem('agroprimos_auth_expiry', expiryDate.toISOString())
       localStorage.setItem('agroprimos_socio_id', socioData.id.toString())
       localStorage.setItem('agroprimos_socio_nome', socioData.nome)
       setIsAuthenticated(true)
@@ -95,6 +115,7 @@ export default function Home() {
 
   const handleLogout = () => {
     localStorage.removeItem('agroprimos_auth')
+    localStorage.removeItem('agroprimos_auth_expiry')
     localStorage.removeItem('agroprimos_socio_id')
     localStorage.removeItem('agroprimos_socio_nome')
     setIsAuthenticated(false)
@@ -109,6 +130,9 @@ export default function Home() {
       setLoteAtual(loteData)
       const { data: lotesData } = await supabase.from('lotes').select('*').order('data_inicio', { ascending: false })
       setLotes(lotesData || [])
+      // Carregar todos os lançamentos de todos os lotes (para calcular rendimento correto no preview)
+      const { data: todosLancamentosData } = await supabase.from('lancamentos').select('*')
+      setTodosLancamentos(todosLancamentosData || [])
       if (loteData) {
         const { data: animaisData } = await supabase.from('animais').select('*').eq('lote_id', loteData.id)
         setAnimais(animaisData || [])
@@ -366,7 +390,7 @@ export default function Home() {
   }
 
   const calcularIndicadores = () => {
-    if (!caixa) return { totalAportes: 0, totalEntradas: 0, custoTotal: 0, totalInfra: 0, caixaAtual: 0, patrimonioGado: 0, animaisAtivos: 0, animaisVendidos: 0, totalArrobasAtivas: 0, valorMinimoArroba: 0 }
+    if (!caixa) return { totalAportes: 0, totalEntradas: 0, custoTotal: 0, totalInfra: 0, caixaAtual: 0, patrimonioGado: 0, animaisAtivos: 0, animaisVendidos: 0, totalArrobasAtivas: 0, minimoPorCabeca: 0 }
     const totalAportes = parseFloat(caixa.total_aportes) || 0
     const totalEntradas = parseFloat(caixa.total_entradas) || 0
     const totalSaidas = Math.abs(parseFloat(caixa.total_saidas)) || 0
@@ -376,8 +400,11 @@ export default function Home() {
     const animaisAtivosArr = animais.filter(a => a.status === 'ativo')
     const animaisVendidos = animais.filter(a => a.status === 'vendido')
     const totalArrobasAtivas = animaisAtivosArr.reduce((acc, a) => acc + parseFloat(a.arroba_atual || 0), 0)
-    const valorMinimoArroba = totalArrobasAtivas > 0 ? totalSaidas / totalArrobasAtivas : 0
-    return { totalAportes, totalEntradas, custoTotal: totalSaidas, totalInfra, caixaAtual, patrimonioGado, animaisAtivos: animaisAtivosArr.length, animaisVendidos: animaisVendidos.length, totalArrobasAtivas, valorMinimoArroba }
+    // Resultado Bruto = Entradas - Custos
+    const resultadoBruto = totalEntradas - totalSaidas
+    // Mínimo por cabeça para ponto de equilíbrio = -Resultado Bruto / Animais ativos (quanto falta por animal para empatar)
+    const minimoPorCabeca = animaisAtivosArr.length > 0 ? Math.abs(resultadoBruto) / animaisAtivosArr.length : 0
+    return { totalAportes, totalEntradas, custoTotal: totalSaidas, totalInfra, caixaAtual, patrimonioGado, animaisAtivos: animaisAtivosArr.length, animaisVendidos: animaisVendidos.length, totalArrobasAtivas, minimoPorCabeca, resultadoBruto }
   }
   
   const indicadores = calcularIndicadores()
@@ -423,19 +450,36 @@ export default function Home() {
 
   // Calcular rendimento de um lote fechado (JUROS COMPOSTOS)
   // Fórmula: (((Resultado + Aportes) / Aportes) ^ (1 / Meses)) - 1
+  // Calcular rendimento de um lote fechado (JUROS COMPOSTOS)
+  // Usa os lançamentos para calcular valores atualizados
   const calcularRendimentoLote = (lote) => {
-    if (!lote || !lote.total_aportes || lote.total_aportes <= 0) return { soCustos: 0, comDespesas: 0 }
+    if (!lote) return { soCustos: 0, comDespesas: 0 }
+    
+    // Filtrar lançamentos deste lote
+    const lancamentosLote = todosLancamentos.filter(l => l.lote_id === lote.id)
+    
+    // Calcular totais dos lançamentos
+    const totalAportes = lancamentosLote.filter(l => l.tipo === 'aporte').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
+    const totalVendas = lancamentosLote.filter(l => l.tipo === 'entrada').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
+    const totalCustos = lancamentosLote.filter(l => l.tipo === 'saida').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+    const totalDespesas = lancamentosLote.filter(l => l.tipo === 'infraestrutura').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+    
+    if (totalAportes <= 0) return { soCustos: 0, comDespesas: 0 }
+    
+    const resultadoBruto = totalVendas - totalCustos
+    const resultadoLiquido = resultadoBruto - totalDespesas
+    
     const dias = calcularDiasLote(lote.data_inicio, lote.data_fim)
     const meses = dias / 30
     if (meses <= 0) return { soCustos: 0, comDespesas: 0 }
     
     // Montante = Resultado + Aportes (o que sobrou no final)
-    const montanteBruto = lote.resultado_bruto + lote.total_aportes
-    const montanteLiquido = lote.resultado_liquido + lote.total_aportes
+    const montanteBruto = resultadoBruto + totalAportes
+    const montanteLiquido = resultadoLiquido + totalAportes
     
     // Taxa mensal = (Montante / Principal) ^ (1/meses) - 1
-    const soCustos = (Math.pow(montanteBruto / lote.total_aportes, 1 / meses) - 1) * 100
-    const comDespesas = (Math.pow(montanteLiquido / lote.total_aportes, 1 / meses) - 1) * 100
+    const soCustos = (Math.pow(montanteBruto / totalAportes, 1 / meses) - 1) * 100
+    const comDespesas = (Math.pow(montanteLiquido / totalAportes, 1 / meses) - 1) * 100
     
     return { soCustos, comDespesas }
   }
@@ -653,7 +697,7 @@ export default function Home() {
                   <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Animais Ativos</div><div className="text-xl md:text-2xl font-bold">{indicadores.animaisAtivos}</div></div>
                   <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Total @ Vivo</div><div className="text-xl md:text-2xl font-bold">{indicadores.totalArrobasAtivas.toFixed(1)} @</div></div>
                   <div className="bg-gray-50 rounded-xl p-3 md:p-4"><div className="text-[10px] md:text-xs text-gray-400 mb-1">Média @/Animal</div><div className="text-xl md:text-2xl font-bold">{indicadores.animaisAtivos > 0 ? (indicadores.totalArrobasAtivas / indicadores.animaisAtivos).toFixed(1) : '0'} @</div></div>
-                  <div className="bg-yellow-50 rounded-xl p-3 md:p-4 border-2 border-yellow-200"><div className="text-[10px] md:text-xs text-yellow-700 mb-1 font-medium">@ Mínimo p/ Lucro</div><div className="text-xl md:text-2xl font-bold text-yellow-700">{formatMoney(indicadores.valorMinimoArroba)}</div></div>
+                  <div className="bg-yellow-50 rounded-xl p-3 md:p-4 border-2 border-yellow-200"><div className="text-[10px] md:text-xs text-yellow-700 mb-1 font-medium">Mín/Cabeça p/ Equilíbrio</div><div className="text-xl md:text-2xl font-bold text-yellow-700">{formatMoney(indicadores.minimoPorCabeca)}</div></div>
                 </div>
               </div>
               <div className="bg-white rounded-2xl p-4 md:p-6 shadow-lg">
@@ -1075,13 +1119,18 @@ export default function Home() {
         const totalVendas = lancamentosLote.filter(l => l.tipo === 'entrada').reduce((acc, l) => acc + parseFloat(l.valor || 0), 0)
         const totalCustos = lancamentosLote.filter(l => l.tipo === 'saida').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
         const totalDespesas = lancamentosLote.filter(l => l.tipo === 'infraestrutura').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
+        const dividendos = lancamentosLote.filter(l => l.tipo === 'dividendo').reduce((acc, l) => acc + Math.abs(parseFloat(l.valor || 0)), 0)
         const resultadoBruto = totalVendas - totalCustos
         const resultadoLiquido = resultadoBruto - totalDespesas
+        const resultadoFinal = resultadoLiquido - dividendos
         
-        // Rendimentos
+        // Rendimentos (Juros compostos)
         const mesesNum = dias / 30
-        const rendSoCustos = mesesNum > 0 && totalAportes > 0 ? ((resultadoBruto / totalAportes) / mesesNum) * 100 : 0
-        const rendComDespesas = mesesNum > 0 && totalAportes > 0 ? ((resultadoLiquido / totalAportes) / mesesNum) * 100 : 0
+        // Juros compostos: (((Resultado + Aportes) / Aportes) ^ (1 / Meses)) - 1
+        const montanteBruto = resultadoBruto + totalAportes
+        const montanteLiquido = resultadoLiquido + totalAportes
+        const rendSoCustos = mesesNum > 0 && totalAportes > 0 ? (Math.pow(montanteBruto / totalAportes, 1 / mesesNum) - 1) * 100 : 0
+        const rendComDespesas = mesesNum > 0 && totalAportes > 0 ? (Math.pow(montanteLiquido / totalAportes, 1 / mesesNum) - 1) * 100 : 0
         
         // Arrobas - compra é vivo (15kg), venda é morto (30kg)
         const totalArrobaCompra = animaisLote.reduce((a, x) => a + parseFloat(x.arroba_compra || 0), 0)
@@ -1127,6 +1176,20 @@ export default function Home() {
                     <div className={`text-xl md:text-2xl font-bold ${resultadoLiquido >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatMoney(resultadoLiquido)}</div>
                   </div>
                 </div>
+                
+                {/* Dividendos e Saldo Final */}
+                {dividendos > 0 && (
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 mb-6">
+                    <div className="rounded-xl p-4 text-center bg-purple-100">
+                      <div className="text-xs text-purple-600 mb-1">Dividendos Distribuídos</div>
+                      <div className="text-xl md:text-2xl font-bold text-purple-700">-{formatMoney(dividendos)}</div>
+                    </div>
+                    <div className={`rounded-xl p-4 text-center ${resultadoFinal >= 0 ? 'bg-gray-100' : 'bg-red-100'}`}>
+                      <div className="text-xs text-gray-600 mb-1">Saldo Final</div>
+                      <div className={`text-xl md:text-2xl font-bold ${resultadoFinal >= 0 ? 'text-gray-700' : 'text-red-700'}`}>{formatMoney(resultadoFinal)}</div>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Rendimento */}
                 <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-4 md:p-5 mb-6">
